@@ -9,16 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Persian Datepicker CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
-
-    <!-- jQuery (required by persian-datepicker) - Load first -->
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-
-    <!-- Persian Datepicker JS dependencies - Load after jQuery, before main module script -->
-    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
-    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -46,6 +36,7 @@
         let userCars = []; // Array to store car objects for the current user
 
         // Comprehensive list of popular cars in Iran (Iranian, Chinese, common foreign)
+        // This list is used for adding new cars, not for selection dropdown directly
         const allAvailableCars = [
             // Iranian Cars
             { id: 'ikco-samand', make: 'ایران خودرو', model: 'سمند', year: 'متنوع', engine: 'متنوع' },
@@ -183,7 +174,6 @@
                     if (user) {
                         userId = user.uid;
                         console.log("Authenticated with user ID:", userId);
-                        // Removed userId display from UI
                         isAuthReady = true;
                         loadCars(); // Load cars after auth is ready
                     } else {
@@ -277,9 +267,8 @@
                 await deleteDoc(carDocRef);
                 displayStatusMessage('خودرو با موفقیت حذف شد!', 'success');
                 selectedCarId = null; // Clear selected car
-                // document.getElementById('car-selection-dropdown').value = ''; // Reset dropdown
+                document.getElementById('car-selection-dropdown').value = ''; // Reset dropdown
                 document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.'; // Reset selected car display
-                document.getElementById('car-search-input').value = ''; // Clear search input
                 document.getElementById('service-sections').classList.add('hidden'); // Hide service sections
                 loadCars(); // Reload cars
             } catch (e) {
@@ -299,19 +288,19 @@
                 snapshot.forEach((doc) => {
                     userCars.push({ id: doc.id, ...doc.data() });
                 });
-                renderCarSelectionList(allAvailableCars); // Render all available cars for search
+                renderCarSelectionDropdown(); // Render dropdown directly
                 if (userCars.length > 0 && !selectedCarId) {
                     selectedCarId = userCars[0].id; // Auto-select the first car
                     const selectedCar = userCars.find(car => car.id === selectedCarId);
                     if (selectedCar) {
                         document.getElementById('selected-car-display').textContent = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
-                        document.getElementById('car-search-input').value = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                        document.getElementById('car-selection-dropdown').value = selectedCarId; // Set dropdown value
                     }
                     handleCarSelection(); // Trigger update for the first car
                 } else if (userCars.length === 0) {
                     selectedCarId = null;
                     document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.';
-                    document.getElementById('car-search-input').value = '';
+                    document.getElementById('car-selection-dropdown').innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
                     document.getElementById('service-sections').classList.add('hidden');
                 } else if (selectedCarId && !userCars.some(car => car.id === selectedCarId)) {
                     // If previously selected car was deleted
@@ -319,7 +308,7 @@
                     const selectedCar = userCars.find(car => car.id === selectedCarId);
                     if (selectedCar) {
                         document.getElementById('selected-car-display').textContent = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
-                        document.getElementById('car-search-input').value = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                        document.getElementById('car-selection-dropdown').value = selectedCarId; // Set dropdown value
                     }
                     handleCarSelection();
                 }
@@ -329,57 +318,86 @@
             });
         };
 
-        const renderCarSelectionList = (carsToRender) => {
-            const carListUl = document.getElementById('car-list-ul');
-            carListUl.innerHTML = '';
-            if (carsToRender.length === 0) {
-                carListUl.innerHTML = '<li class="p-2 text-gray-500">خودرویی یافت نشد.</li>';
+        const renderCarSelectionDropdown = () => {
+            const dropdown = document.getElementById('car-selection-dropdown');
+            dropdown.innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
+            // Add existing user cars to the dropdown
+            userCars.forEach(car => {
+                const option = document.createElement('option');
+                option.value = car.id;
+                option.textContent = `${car.make} ${car.model} (${car.year})`;
+                dropdown.appendChild(option);
+            });
+            if (selectedCarId) {
+                dropdown.value = selectedCarId;
+            }
+        };
+
+        window.handleCarSelection = async () => {
+            const dropdown = document.getElementById('car-selection-dropdown');
+            const newSelectedCarId = dropdown.value;
+            
+            if (!newSelectedCarId) {
+                selectedCarId = null;
+                document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.';
+                document.getElementById('service-sections').classList.add('hidden');
                 return;
             }
-            carsToRender.forEach(car => {
-                const li = document.createElement('li');
-                li.className = 'p-2 hover:bg-blue-100 cursor-pointer';
-                li.textContent = `${car.make} ${car.model} (${car.year})`;
-                li.dataset.carId = car.id; // Store original ID
-                li.addEventListener('click', () => selectCarFromList(car));
-                carListUl.appendChild(li);
-            });
-        };
 
-        const selectCarFromList = (car) => {
-            selectedCarId = car.id;
-            document.getElementById('selected-car-display').textContent = `${car.make} ${car.model} (${car.year})`;
-            document.getElementById('car-search-input').value = `${car.make} ${car.model} (${car.year})`;
-            document.getElementById('car-search-results').classList.add('hidden');
-            handleCarSelection(); // Trigger update for the newly selected car
-        };
-
-        window.searchCars = () => {
-            const searchTerm = document.getElementById('car-search-input').value.toLowerCase();
-            const filteredCars = allAvailableCars.filter(car => 
-                car.make.toLowerCase().includes(searchTerm) || 
-                car.model.toLowerCase().includes(searchTerm)
-            );
-            renderCarSelectionList(filteredCars);
-            document.getElementById('car-search-results').classList.remove('hidden');
-        };
-
-        window.hideSearchResults = () => {
-            // Delay hiding to allow click event on list items to fire
-            setTimeout(() => {
-                document.getElementById('car-search-results').classList.add('hidden');
-            }, 200);
-        };
-
-        window.handleCarSelection = () => {
-            // This function is called when a car is selected from the dropdown or auto-selected
-            if (selectedCarId) {
+            const selectedCarData = userCars.find(car => car.id === newSelectedCarId); // Find from userCars
+            
+            if (selectedCarData) { // If it's an existing user car
+                selectedCarId = newSelectedCarId;
+                document.getElementById('selected-car-display').textContent = `${selectedCarData.make} ${selectedCarData.model} (${selectedCarData.year})`;
                 document.getElementById('service-sections').classList.remove('hidden');
-                loadServices(); // Load services for the newly selected car
-            } else {
-                document.getElementById('service-sections').classList.add('hidden');
+                loadServices();
+            } else { // This means a car from allAvailableCars was selected, but it's not yet a user's car.
+                     // This path is now for adding a new car from the comprehensive list.
+                const carToAdd = allAvailableCars.find(car => car.id === newSelectedCarId);
+                if (carToAdd) {
+                    const confirmed = await showConfirmationModal(
+                        'افزودن خودرو به لیست شما',
+                        `آیا می‌خواهید "${carToAdd.make} ${carToAdd.model}" را به لیست خودروهای خود اضافه کنید؟`
+                    );
+                    if (confirmed) {
+                        if (!isAuthReady || !userId) {
+                            displayStatusMessage('در حال آماده‌سازی سیستم... لطفا صبر کنید.', 'info');
+                            dropdown.value = ''; // Reset dropdown
+                            return;
+                        }
+                        try {
+                            const carsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars`);
+                            await setDoc(doc(carsCollectionRef, carToAdd.id), { // Use predefined ID
+                                make: carToAdd.make,
+                                model: carToAdd.model,
+                                year: carToAdd.year,
+                                engine: carToAdd.engine,
+                                initialMileage: 0, // Default initial mileage
+                                createdAt: new Date()
+                            });
+                            selectedCarId = carToAdd.id;
+                            document.getElementById('selected-car-display').textContent = `${carToAdd.make} ${carToAdd.model} (${carToAdd.year})`;
+                            displayStatusMessage('خودرو با موفقیت اضافه شد و انتخاب گردید!', 'success');
+                            loadCars(); // Reload cars to update dropdown and ensure it's selected
+                        } catch (e) {
+                            console.error("Error adding car from dropdown: ", e);
+                            displayStatusMessage('خطا در افزودن خودرو.', 'error');
+                            dropdown.value = ''; // Reset dropdown
+                        }
+                    } else {
+                        dropdown.value = ''; // Reset dropdown if not confirmed
+                        selectedCarId = null;
+                        document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.';
+                        document.getElementById('service-sections').classList.add('hidden');
+                    }
+                } else { // Should not happen if dropdown is populated correctly
+                    selectedCarId = null;
+                    document.getElementById('selected-car-display').textContent = 'خودروی نامعتبری انتخاب شد.';
+                    document.getElementById('service-sections').classList.add('hidden');
+                }
             }
         };
+
 
         // --- Service Management Functions (modified for selectedCarId) ---
         window.addService = async () => {
@@ -388,27 +406,15 @@
                 return;
             }
 
-            const serviceDateInput = document.getElementById('serviceDate');
+            const serviceDateInput = document.getElementById('serviceDate'); // Now a single date input
             const serviceMileageInput = document.getElementById('serviceMileage');
             const serviceTypeInput = document.getElementById('serviceType');
 
-            // Get Shamsi date from datepicker, then convert to GregorianYYYY-MM-DD
-            const persianDateString = serviceDateInput.value; // e.g., "1402/04/15"
-            let gregorianDateString;
-            try {
-                // This conversion relies on the persian-date library
-                const pDate = new persianDate([parseInt(persianDateString.substring(0,4)), parseInt(persianDateString.substring(5,7)), parseInt(persianDateString.substring(8,10))]);
-                gregorianDateString = pDate.toGregorian().format('YYYY-MM-DD');
-            } catch (e) {
-                console.error("Error converting Persian date:", e);
-                displayStatusMessage('فرمت تاریخ شمسی وارد شده صحیح نیست. (مثال: 1402/01/15)', 'error');
-                return;
-            }
-
+            const date = serviceDateInput.value; // This will be in YYYY-MM-DD (Gregorian)
             const mileage = parseInt(serviceMileageInput.value);
             const type = serviceTypeInput.value;
 
-            if (!persianDateString || isNaN(mileage) || mileage <= 0 || !type) {
+            if (!date || isNaN(mileage) || mileage <= 0 || !type) {
                 displayStatusMessage('لطفا تمام فیلدها را به درستی پر کنید.', 'error');
                 return;
             }
@@ -416,7 +422,7 @@
             try {
                 const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
                 await addDoc(servicesCollectionRef, {
-                    date: gregorianDateString, // Store as GregorianYYYY-MM-DD string
+                    date: date, // Store as Gregorian YYYY-MM-DD string
                     mileage: mileage,
                     type: type,
                     timestamp: new Date() // For sorting
@@ -478,7 +484,8 @@
             }
             services.forEach(service => {
                 // Convert Gregorian date string to Date object, then to Persian string
-                const persianDate = new Date(service.date).toLocaleDateString('fa-IR', { calendar: 'persian' });
+                const gregorianDate = new Date(service.date);
+                const persianDate = gregorianDate.toLocaleDateString('fa-IR', { calendar: 'persian' });
                 const row = document.createElement('tr');
                 row.className = 'border-b border-gray-200 hover:bg-gray-50';
                 row.innerHTML = `
@@ -744,6 +751,11 @@
         // Function to update the service description display based on selected type
         window.updateServiceDescriptionDisplay = async () => {
             const serviceTypeSelect = document.getElementById('serviceType');
+            // Check if serviceTypeSelect exists before accessing its value
+            if (!serviceTypeSelect) {
+                console.warn("Service type select element not found.");
+                return;
+            }
             const selectedType = serviceTypeSelect.value;
             const descriptionDiv = document.getElementById('serviceTypeDescription');
             
@@ -810,44 +822,18 @@
                 // Firebase will be initialized by handleFileUpload if a file is selected and confirmed
             });
 
-            document.getElementById('car-search-input').addEventListener('input', window.searchCars);
-            document.getElementById('car-search-input').addEventListener('focus', window.searchCars); // Show results on focus
-            document.getElementById('car-search-input').addEventListener('blur', window.hideSearchResults);
-
+            // car-selection-dropdown change listener
+            const carSelectionDropdown = document.getElementById('car-selection-dropdown');
+            if (carSelectionDropdown) {
+                carSelectionDropdown.addEventListener('change', window.handleCarSelection);
+            } else {
+                console.error("Car selection dropdown not found.");
+            }
+            
             document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
-            // car-selection-dropdown is replaced, its change listener is no longer needed directly here
-            // selection is handled by selectCarFromList now which calls handleCarSelection
 
-            // Initialize Persian Datepicker
-            // Ensure jQuery is loaded before initializing datepicker
-            $(document).ready(function() {
-                new persianDatepicker({
-                    element: document.getElementById('serviceDate'),
-                    altField: '#serviceDate', // Use the same input for altField to get Shamsi date
-                    altFormat: 'YYYY/MM/DD',
-                    initialValueType: 'persian',
-                    format: 'YYYY/MM/DD',
-                    calendar: {
-                        persian: {
-                            locale: 'fa'
-                        }
-                    },
-                    navigator: {
-                        enabled: true,
-                        scroll: {
-                            enabled: true
-                        },
-                        text: {
-                            btnNextText: 'بعدی',
-                            btnPrevText: 'قبلی'
-                        }
-                    },
-                    onSelect: function (selectedDate) {
-                        // The datepicker automatically updates the input field with Shamsi date
-                        // No explicit action needed here for saving, as addService will read it
-                    }
-                });
-            });
+            // Initial rendering of car selection dropdown
+            renderCarSelectionDropdown();
         });
     </script>
     <style>
@@ -962,16 +948,11 @@
 
             <section id="car-management" class="card mb-8">
                 <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">مدیریت خودروها</h2>
-                <div class="mb-4 relative">
-                    <label for="car-search-input" class="block text-sm font-medium text-gray-700 mb-1">جستجو و انتخاب خودرو:</label>
-                    <input type="text" id="car-search-input" placeholder="برند یا مدل خودرو را جستجو کنید..." 
-                           class="focus:ring-blue-500 focus:border-blue-500" 
-                           oninput="searchCars()" onfocus="searchCars()" onblur="hideSearchResults()">
-                    <div id="car-search-results" class="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto hidden">
-                        <ul id="car-list-ul">
-                            <!-- Cars will be populated here by JavaScript -->
-                        </ul>
-                    </div>
+                <div class="mb-4">
+                    <label for="car-selection-dropdown" class="block text-sm font-medium text-gray-700 mb-1">انتخاب خودرو:</label>
+                    <select id="car-selection-dropdown" class="focus:ring-blue-500 focus:border-blue-500">
+                        <!-- Cars will be populated here by JavaScript -->
+                    </select>
                 </div>
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">خودروی انتخاب شده:</label>
@@ -1015,9 +996,9 @@
                     <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">ثبت سرویس جدید</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div>
-                            <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (شمسی):</label>
-                            <input type="text" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500" placeholder="مثال: 1402/01/15">
-                            <p class="text-xs text-gray-500 mt-1">تاریخ را با کلیک روی فیلد انتخاب کنید.</p>
+                            <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (میلادی):</label>
+                            <input type="date" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">تاریخ را به میلادی وارد کنید (مثال: 2023-01-15)</p>
                         </div>
                         <div>
                             <label for="serviceMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ:</label>
@@ -1070,33 +1051,32 @@
                         <table class="min-w-full bg-white rounded-lg">
                             <thead>
                                 <tr class="bg-gray-100 text-gray-700 text-right">
-                                    <th class="py-3 px-4 font-semibold">تاریخ (شمسی)</th>
+                                    <th class="py-3 px-4 font-semibold">تاریخ (میلادی)</th>
                                     <th class="py-3 px-4 font-semibold">کیلومتراژ</th>
                                     <th class="py-3 px-4 font-semibold">نوع سرویس</th>
                                     <th class="py-3 px-4 font-semibold">عملیات</th>
-                                </tr>
-                            </thead>
-                            <tbody id="serviceHistoryBody">
-                                <!-- Service records will be loaded here by JavaScript -->
-                                <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
-                            </tbody>
-                        </table>
+                            </tr>
+                        </thead>
+                        <tbody id="serviceHistoryBody">
+                            <!-- Service records will be loaded here by JavaScript -->
+                            <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                    <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
+                    <div class="file-input-wrapper">
+                        <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
+                        <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                        <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
-                        <div class="file-input-wrapper">
-                            <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
-                            <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
-                </section>
-            </div>
-
-            <footer class="text-center mt-12 pt-6 border-t border-gray-200">
-                <p class="text-sm text-gray-500">طراحی و پیاده‌سازی شده برای پیگیری سرویس‌های خودروی شما.</p>
-            </footer>
+                </div>
+                <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
+            </section>
         </div>
+
+        <footer class="text-center mt-12 pt-6 border-t border-gray-200">
+            <p class="text-sm text-gray-500">طراحی و پیاده‌سازی شده برای پیگیری سرویس‌های خودروی شما.</p>
+        </footer>
     </div>
 
     <!-- Custom Confirmation Modal -->
