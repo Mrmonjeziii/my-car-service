@@ -121,7 +121,7 @@
                     if (user) {
                         userId = user.uid;
                         console.log("Authenticated with user ID:", userId);
-                        document.getElementById('user-id-display').textContent = `شناسه کاربری: ${userId}`;
+                        // Removed userId display from UI
                         isAuthReady = true;
                         loadCars(); // Load cars after auth is ready
                     } else {
@@ -532,17 +532,15 @@
 
 
         window.handleFileUpload = async (event) => {
-            if (!isAuthReady || !userId || !selectedCarId) {
-                displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید.', 'error');
-                return;
-            }
-
+            // Note: This function is called directly by the file input's onchange event.
+            // The logic for showing/hiding welcome screen is handled in the listener for old-user-button.
+            
             const file = event.target.files[0];
             if (!file) {
+                document.getElementById('csvFileInput').value = ''; // Clear file input if no file selected
                 return;
             }
 
-            // Check for custom file extension
             if (!file.name.endsWith('.carservice')) {
                 displayStatusMessage('لطفا فقط فایل‌های با پسوند ".carservice" را بارگذاری کنید.', 'error');
                 document.getElementById('csvFileInput').value = '';
@@ -629,6 +627,10 @@
                 }
 
                 displayStatusMessage('اطلاعات سرویس با موفقیت از فایل بارگذاری شد.', 'success');
+                // Hide welcome screen and show main content after successful import
+                document.getElementById('welcome-screen').classList.add('hidden');
+                document.getElementById('main-app-content').classList.remove('hidden');
+
             } catch (e) {
                 console.error("Error importing services from file: ", e);
                 displayStatusMessage('خطا در بارگذاری فایل سرویس. لطفا از فرمت صحیح فایل اطمینان حاصل کنید.', 'error');
@@ -693,8 +695,20 @@
 
         // Initialize app when the window loads
         window.addEventListener('load', () => {
-            initFirebase();
-            window.updateServiceDescriptionDisplay(); // Set initial description
+            // Event listener for the "شروع کار" button (new user)
+            document.getElementById('new-user-button').addEventListener('click', () => {
+                document.getElementById('welcome-screen').classList.add('hidden');
+                document.getElementById('main-app-content').classList.remove('hidden');
+                initFirebase(); // Initialize Firebase only when the app starts
+                window.updateServiceDescriptionDisplay(); // Set initial description
+            });
+
+            // Event listener for the "بارگذاری فایل" button (old user)
+            document.getElementById('old-user-button').addEventListener('click', () => {
+                document.getElementById('csvFileInput').click(); // Programmatically click the hidden file input
+                initFirebase(); // Initialize Firebase when old user attempts to load file
+            });
+
             document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
             document.getElementById('car-selection-dropdown').addEventListener('change', window.handleCarSelection);
 
@@ -817,144 +831,160 @@
 </head>
 <body class="antialiased p-4">
 
-    <div class="container mx-auto mt-8">
-        <header class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-[#6E7C7C] mb-2">ردیاب سرویس خودرو</h1>
-            <p class="text-lg text-gray-600">مدیریت و پیگیری سرویس‌های چندین خودرو</p>
-            <p id="user-id-display" class="text-xs text-gray-400 mt-2">شناسه کاربری: در حال بارگذاری...</p>
-        </header>
-
-        <div id="status-message" class="hidden px-4 py-3 rounded-md mb-4 text-center" role="alert">
-            <!-- Dynamic status messages will appear here -->
+    <div id="welcome-screen" class="fixed inset-0 bg-gray-100 flex flex-col items-center justify-center z-50 p-4">
+        <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-md w-full">
+            <h2 class="text-3xl font-bold text-[#6E7C7C] mb-4">به ردیاب سرویس خودرو خوش آمدید!</h2>
+            <p class="text-gray-700 mb-6">با این برنامه می‌توانید به راحتی سرویس‌های خودروهای خود را مدیریت و پیگیری کنید.</p>
+            <div class="flex flex-col md:flex-row gap-4">
+                <button id="new-user-button" class="bg-blue-600 text-white py-3 px-8 rounded-lg text-lg hover:bg-blue-700 transition-colors duration-200 flex-1">کاربر جدید (شروع کار)</button>
+                <div class="file-input-wrapper flex-1">
+                    <button id="old-user-button" class="file-input-button py-3 px-8 text-lg focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">کاربر قدیمی (بارگذاری فایل)</button>
+                    <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
+                </div>
+            </div>
         </div>
+    </div>
 
-        <section id="car-management" class="card mb-8">
-            <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">مدیریت خودروها</h2>
-            <div class="mb-4">
-                <label for="car-selection-dropdown" class="block text-sm font-medium text-gray-700 mb-1">انتخاب خودرو:</label>
-                <select id="car-selection-dropdown" class="focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">در حال بارگذاری خودروها...</option>
-                </select>
+    <div id="main-app-content" class="hidden">
+        <div class="container mx-auto mt-8">
+            <header class="text-center mb-8">
+                <h1 class="text-3xl md:text-4xl font-bold text-[#6E7C7C] mb-2">ردیاب سرویس خودرو</h1>
+                <p class="text-lg text-gray-600">مدیریت و پیگیری سرویس‌های چندین خودرو</p>
+                <!-- Removed userId display from UI -->
+            </header>
+
+            <div id="status-message" class="hidden px-4 py-3 rounded-md mb-4 text-center" role="alert">
+                <!-- Dynamic status messages will appear here -->
             </div>
-            <div class="flex flex-col md:flex-row gap-4 mb-6">
-                <button onclick="document.getElementById('add-car-form').classList.toggle('hidden')" class="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex-1">افزودن خودرو جدید</button>
-                <button onclick="deleteCar()" class="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 flex-1">حذف خودرو انتخاب شده</button>
+
+            <section id="car-management" class="card mb-8">
+                <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">مدیریت خودروها</h2>
+                <div class="mb-4">
+                    <label for="car-selection-dropdown" class="block text-sm font-medium text-gray-700 mb-1">انتخاب خودرو:</label>
+                    <select id="car-selection-dropdown" class="focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">در حال بارگذاری خودروها...</option>
+                    </select>
+                </div>
+                <div class="flex flex-col md:flex-row gap-4 mb-6">
+                    <button onclick="document.getElementById('add-car-form').classList.toggle('hidden')" class="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex-1">افزودن خودرو جدید</button>
+                    <button onclick="deleteCar()" class="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 flex-1">حذف خودرو انتخاب شده</button>
+                </div>
+
+                <div id="add-car-form" class="hidden bg-gray-50 p-4 rounded-md mt-4">
+                    <h3 class="text-lg font-bold mb-3">افزودن خودرو جدید</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="carMake" class="block text-sm font-medium text-gray-700 mb-1">برند:</label>
+                            <input type="text" id="carMake" placeholder="مثال: هیوندای">
+                        </div>
+                        <div>
+                            <label for="carModel" class="block text-sm font-medium text-gray-700 mb-1">مدل:</label>
+                            <input type="text" id="carModel" placeholder="مثال: ورنا">
+                        </div>
+                        <div>
+                            <label for="carYear" class="block text-sm font-medium text-gray-700 mb-1">سال تولید:</label>
+                            <input type="number" id="carYear" placeholder="مثال: 2005">
+                        </div>
+                        <div>
+                            <label for="carEngine" class="block text-sm font-medium text-gray-700 mb-1">نوع موتور:</label>
+                            <input type="text" id="carEngine" placeholder="مثال: 1.5L دستی">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="carInitialMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ فعلی:</label>
+                            <input type="number" id="carInitialMileage" placeholder="مثال: 120000">
+                        </div>
+                    </div>
+                    <button onclick="addCar()" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">ثبت خودرو</button>
+                </div>
+            </section>
+
+            <div id="service-sections" class="hidden">
+                <section id="add-service" class="card mb-8">
+                    <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">ثبت سرویس جدید</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div>
+                            <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (شمسی):</label>
+                            <input type="text" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500" placeholder="مثال: 1402/01/15">
+                            <p class="text-xs text-gray-500 mt-1">تاریخ را با کلیک روی فیلد انتخاب کنید.</p>
+                        </div>
+                        <div>
+                            <label for="serviceMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ:</label>
+                            <input type="number" id="serviceMileage" placeholder="مثال: 120000" class="focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label for="serviceType" class="block text-sm font-medium text-gray-700 mb-1">نوع سرویس:</label>
+                            <select id="serviceType" class="focus:ring-blue-500 focus:border-blue-500">
+                                <option value="Oil Change">تعویض روغن</option>
+                                <option value="Minor Service">سرویس کوچک (۵ هزار کیلومتر)</option>
+                                <option value="Major Service">سرویس بزرگ (۱۰/۲۰ هزار کیلومتر)</option>
+                                <option value="Transmission Fluid">تعویض روغن گیربکس</option>
+                                <option value="Brake Service">سرویس ترمز</option>
+                                <option value="Other">سایر</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="serviceTypeDescription" class="bg-blue-50 p-4 rounded-md mt-4 hidden">
+                        <!-- Service type description will be loaded here -->
+                    </div>
+                    <button onclick="addService()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 mt-4">ثبت سرویس</button>
+                </section>
+
+                <section id="car-status" class="card mb-8 p-6 bg-gray-50 border-l-4 border-gray-400">
+                    <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">وضعیت کلی خودرو</h2>
+                    <p id="carStatusText" class="text-lg font-semibold text-gray-800">وضعیت خودرو: نامشخص</p>
+                    <div id="carStatus" class="mt-3 px-4 py-2 rounded-md text-center font-bold">
+                        <!-- Status color and text will be updated by JS -->
+                    </div>
+                </section>
+
+                <section id="next-service" class="card mb-8 p-6 bg-blue-50 border-l-4 border-blue-400">
+                    <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">سرویس بعدی</h2>
+                    <p id="lastServiceInfo" class="text-gray-600 mb-3 text-sm">هیچ سرویسی ثبت نشده است.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-sm font-medium text-gray-700">تاریخ پیشنهادی:</p>
+                            <p id="nextServiceDate" class="text-lg font-semibold text-blue-800">---</p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-700">کیلومتراژ پیشنهادی:</p>
+                            <p id="nextServiceMileage" class="text-lg font-semibold text-blue-800">---</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="service-history" class="card mb-8">
+                    <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">تاریخچه سرویس‌ها</h2>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full bg-white rounded-lg">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-700 text-right">
+                                    <th class="py-3 px-4 font-semibold">تاریخ (شمسی)</th>
+                                    <th class="py-3 px-4 font-semibold">کیلومتراژ</th>
+                                    <th class="py-3 px-4 font-semibold">نوع سرویس</th>
+                                    <th class="py-3 px-4 font-semibold">عملیات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="serviceHistoryBody">
+                                <!-- Service records will be loaded here by JavaScript -->
+                                <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                        <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
+                        <div class="file-input-wrapper">
+                            <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
+                            <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
+                </section>
             </div>
 
-            <div id="add-car-form" class="hidden bg-gray-50 p-4 rounded-md mt-4">
-                <h3 class="text-lg font-bold mb-3">افزودن خودرو جدید</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label for="carMake" class="block text-sm font-medium text-gray-700 mb-1">برند:</label>
-                        <input type="text" id="carMake" placeholder="مثال: هیوندای">
-                    </div>
-                    <div>
-                        <label for="carModel" class="block text-sm font-medium text-gray-700 mb-1">مدل:</label>
-                        <input type="text" id="carModel" placeholder="مثال: ورنا">
-                    </div>
-                    <div>
-                        <label for="carYear" class="block text-sm font-medium text-gray-700 mb-1">سال تولید:</label>
-                        <input type="number" id="carYear" placeholder="مثال: 2005">
-                    </div>
-                    <div>
-                        <label for="carEngine" class="block text-sm font-medium text-gray-700 mb-1">نوع موتور:</label>
-                        <input type="text" id="carEngine" placeholder="مثال: 1.5L دستی">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="carInitialMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ فعلی:</label>
-                        <input type="number" id="carInitialMileage" placeholder="مثال: 120000">
-                    </div>
-                </div>
-                <button onclick="addCar()" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">ثبت خودرو</button>
-            </div>
-        </section>
-
-        <div id="service-sections" class="hidden">
-            <section id="add-service" class="card mb-8">
-                <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">ثبت سرویس جدید</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div>
-                        <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (شمسی):</label>
-                        <input type="text" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500" placeholder="مثال: 1402/01/15">
-                        <p class="text-xs text-gray-500 mt-1">تاریخ را با کلیک روی فیلد انتخاب کنید.</p>
-                    </div>
-                    <div>
-                        <label for="serviceMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ:</label>
-                        <input type="number" id="serviceMileage" placeholder="مثال: 120000" class="focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div>
-                        <label for="serviceType" class="block text-sm font-medium text-gray-700 mb-1">نوع سرویس:</label>
-                        <select id="serviceType" class="focus:ring-blue-500 focus:border-blue-500">
-                            <option value="Oil Change">تعویض روغن</option>
-                            <option value="Minor Service">سرویس کوچک (۵ هزار کیلومتر)</option>
-                            <option value="Major Service">سرویس بزرگ (۱۰/۲۰ هزار کیلومتر)</option>
-                            <option value="Transmission Fluid">تعویض روغن گیربکس</option>
-                            <option value="Brake Service">سرویس ترمز</option>
-                            <option value="Other">سایر</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="serviceTypeDescription" class="bg-blue-50 p-4 rounded-md mt-4 hidden">
-                    <!-- Service type description will be loaded here -->
-                </div>
-                <button onclick="addService()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 mt-4">ثبت سرویس</button>
-            </section>
-
-            <section id="car-status" class="card mb-8 p-6 bg-gray-50 border-l-4 border-gray-400">
-                <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">وضعیت کلی خودرو</h2>
-                <p id="carStatusText" class="text-lg font-semibold text-gray-800">وضعیت خودرو: نامشخص</p>
-                <div id="carStatus" class="mt-3 px-4 py-2 rounded-md text-center font-bold">
-                    <!-- Status color and text will be updated by JS -->
-                </div>
-            </section>
-
-            <section id="next-service" class="card mb-8 p-6 bg-blue-50 border-l-4 border-blue-400">
-                <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">سرویس بعدی</h2>
-                <p id="lastServiceInfo" class="text-gray-600 mb-3 text-sm">هیچ سرویسی ثبت نشده است.</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-sm font-medium text-gray-700">تاریخ پیشنهادی:</p>
-                        <p id="nextServiceDate" class="text-lg font-semibold text-blue-800">---</p>
-                    </div>
-                    <div>
-                        <p class="text-sm font-medium text-gray-700">کیلومتراژ پیشنهادی:</p>
-                        <p id="nextServiceMileage" class="text-lg font-semibold text-blue-800">---</p>
-                    </div>
-                </div>
-            </section>
-
-            <section id="service-history" class="card mb-8">
-                <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">تاریخچه سرویس‌ها</h2>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full bg-white rounded-lg">
-                        <thead>
-                            <tr class="bg-gray-100 text-gray-700 text-right">
-                                <th class="py-3 px-4 font-semibold">تاریخ (شمسی)</th>
-                                <th class="py-3 px-4 font-semibold">کیلومتراژ</th>
-                                <th class="py-3 px-4 font-semibold">نوع سرویس</th>
-                                <th class="py-3 px-4 font-semibold">عملیات</th>
-                            </tr>
-                        </thead>
-                        <tbody id="serviceHistoryBody">
-                            <!-- Service records will be loaded here by JavaScript -->
-                            <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                    <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
-                    <div class="file-input-wrapper">
-                        <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
-                        <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
-                    </div>
-                </div>
-                <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
-            </section>
+            <footer class="text-center mt-12 pt-6 border-t border-gray-200">
+                <p class="text-sm text-gray-500">طراحی و پیاده‌سازی شده برای پیگیری سرویس‌های خودروی شما.</p>
+            </footer>
         </div>
-
-        <footer class="text-center mt-12 pt-6 border-t border-gray-200">
-            <p class="text-sm text-gray-500">طراحی و پیاده‌سازی شده برای پیگیری سرویس‌های خودروی شما.</p>
-        </footer>
     </div>
 
     <!-- Custom Confirmation Modal -->
