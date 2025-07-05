@@ -12,8 +12,12 @@
     <!-- Persian Datepicker CSS -->
     <link rel="stylesheet" href="https://unpkg.com/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
 
-    <!-- jQuery (required by persian-datepicker) -->
+    <!-- jQuery (required by persian-datepicker) - Load first -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+    <!-- Persian Datepicker JS dependencies - Load after jQuery, before main module script -->
+    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
+    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
 
     <!-- Firebase SDKs -->
     <script type="module">
@@ -478,7 +482,7 @@
                 const querySnapshot = await getDocs(query(servicesCollectionRef, orderBy("timestamp", "desc")));
                 const services = [];
                 querySnapshot.forEach((doc) => {
-                    services.push(doc.data());
+                    services.push({ id: doc.id, ...doc.data() });
                 });
 
                 if (services.length === 0) {
@@ -695,31 +699,34 @@
             document.getElementById('car-selection-dropdown').addEventListener('change', window.handleCarSelection);
 
             // Initialize Persian Datepicker
-            new persianDatepicker({
-                element: document.getElementById('serviceDate'),
-                altField: '#serviceDate', // Use the same input for altField to get Shamsi date
-                altFormat: 'YYYY/MM/DD',
-                initialValueType: 'persian',
-                format: 'YYYY/MM/DD',
-                calendar: {
-                    persian: {
-                        locale: 'fa'
-                    }
-                },
-                navigator: {
-                    enabled: true,
-                    scroll: {
-                        enabled: true
+            // Ensure jQuery is loaded before initializing datepicker
+            $(document).ready(function() {
+                new persianDatepicker({
+                    element: document.getElementById('serviceDate'),
+                    altField: '#serviceDate', // Use the same input for altField to get Shamsi date
+                    altFormat: 'YYYY/MM/DD',
+                    initialValueType: 'persian',
+                    format: 'YYYY/MM/DD',
+                    calendar: {
+                        persian: {
+                            locale: 'fa'
+                        }
                     },
-                    text: {
-                        btnNextText: 'بعدی',
-                        btnPrevText: 'قبلی'
+                    navigator: {
+                        enabled: true,
+                        scroll: {
+                            enabled: true
+                        },
+                        text: {
+                            btnNextText: 'بعدی',
+                            btnPrevText: 'قبلی'
+                        }
+                    },
+                    onSelect: function (selectedDate) {
+                        // The datepicker automatically updates the input field with Shamsi date
+                        // No explicit action needed here for saving, as addService will read it
                     }
-                },
-                onSelect: function (selectedDate) {
-                    // The datepicker automatically updates the input field with Shamsi date
-                    // No explicit action needed here for saving, as addService will read it
-                }
+                });
             });
         });
     </script>
