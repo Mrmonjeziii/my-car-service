@@ -3,26 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ردیاب سرویس خودرو (چند خودرویی و آنلاین)</title>
+    <title>ردیاب سرویس خودرو (با حساب کاربری)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Persian Datepicker CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
-
-    <!-- jQuery (required by persian-datepicker) - Load first -->
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-
-    <!-- Persian Datepicker JS dependencies - Load after jQuery, before main module script -->
-    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
-    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, getDocs, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the environment
@@ -187,22 +177,71 @@
                         isAuthReady = true;
                         loadCars(); // Load cars after auth is ready
                     } else {
-                        console.log("No user signed in. Attempting anonymous sign-in.");
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (anonError) {
-                            console.error("Anonymous sign-in failed:", anonError);
-                            displayStatusMessage('خطا در ورود به سیستم. لطفا دوباره تلاش کنید.', 'error');
-                        }
+                        console.log("No user signed in. Redirecting to login/register.");
+                        document.getElementById('main-app-content').classList.add('hidden');
+                        document.getElementById('auth-screen').classList.remove('hidden');
                     }
                 });
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
                 displayStatusMessage('خطا در بارگذاری فایربیس. لطفا صفحه را رفرش کنید.', 'error');
+                document.getElementById('main-app-content').classList.add('hidden');
+                document.getElementById('auth-screen').classList.remove('hidden'); // Show auth screen on Firebase init error
+            }
+        };
+
+        // --- Authentication Functions ---
+        window.loginUser = async () => {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
+            if (!email || !password) {
+                displayStatusMessage('لطفا ایمیل و رمز عبور را وارد کنید.', 'error');
+                return;
+            }
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                displayStatusMessage('ورود موفقیت‌آمیز بود!', 'success');
+                document.getElementById('auth-screen').classList.add('hidden');
+                document.getElementById('main-app-content').classList.remove('hidden');
+            } catch (error) {
+                console.error("Login failed:", error);
+                displayStatusMessage('خطا در ورود: ' + error.message, 'error');
+            }
+        };
+
+        window.registerUser = async () => {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
+            if (!email || !password) {
+                displayStatusMessage('لطفا ایمیل و رمز عبور را وارد کنید.', 'error');
+                return;
+            }
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                displayStatusMessage('ثبت‌نام و ورود موفقیت‌آمیز بود!', 'success');
+                document.getElementById('auth-screen').classList.add('hidden');
+                document.getElementById('main-app-content').classList.remove('hidden');
+            } catch (error) {
+                console.error("Registration failed:", error);
+                displayStatusMessage('خطا در ثبت‌نام: ' + error.message, 'error');
+            }
+        };
+
+        window.logoutUser = async () => {
+            try {
+                await signOut(auth);
+                displayStatusMessage('با موفقیت خارج شدید.', 'info');
+                userId = null;
+                selectedCarId = null;
+                userCars = [];
+                document.getElementById('main-app-content').classList.add('hidden');
+                document.getElementById('auth-screen').classList.remove('hidden');
+                document.getElementById('car-selection-dropdown').innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
+                document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.';
+                document.getElementById('service-sections').classList.add('hidden');
+            } catch (error) {
+                console.error("Logout failed:", error);
+                displayStatusMessage('خطا در خروج: ' + error.message, 'error');
             }
         };
 
@@ -667,12 +706,12 @@
 
 
         window.handleFileUpload = async (event) => {
-            // Note: This function is called directly by the file input's onchange event.
-            // The logic for showing/hiding welcome screen is handled in the listener for old-user-button.
+            // This function is now only called by the hidden file input linked to "کاربر قدیمی (بارگذاری فایل)"
             
             const file = event.target.files[0];
             if (!file) {
-                document.getElementById('csvFileInput').value = ''; // Clear file input if no file selected
+                // Clear file input if no file selected, and do not proceed
+                document.getElementById('csvFileInput').value = ''; 
                 return;
             }
 
@@ -766,7 +805,7 @@
                             await new Promise(resolve => {
                                 const checkCarsLoaded = setInterval(() => {
                                     if (userCars.some(car => car.id === selectedCarId)) {
-                                        clearInterval(checkCarsLoaded);
+                                        clearInterval(checkLoaded); // Fix: use checkLoaded instead of checkReady
                                         resolve();
                                     }
                                 }, 100);
@@ -892,18 +931,20 @@
 
         // Initialize app when the window loads
         window.addEventListener('load', () => {
+            initFirebase(); // Initialize Firebase on load to check auth status
+
             // Event listener for the "شروع کار" button (new user)
             document.getElementById('new-user-button').addEventListener('click', () => {
                 document.getElementById('welcome-screen').classList.add('hidden');
-                document.getElementById('main-app-content').classList.remove('hidden');
-                initFirebase(); // Initialize Firebase only when the app starts
+                document.getElementById('auth-screen').classList.remove('hidden'); // Show auth screen for new user
+                // initFirebase will be called by onAuthStateChanged if not already authenticated
                 window.updateServiceDescriptionDisplay(); // Set initial description
             });
 
             // Event listener for the "بارگذاری فایل" button (old user)
             document.getElementById('old-user-button').addEventListener('click', () => {
                 document.getElementById('csvFileInput').click(); // Programmatically click the hidden file input
-                // Firebase will be initialized by handleFileUpload if a file is selected and confirmed
+                // initFirebase will be called by handleFileUpload if a file is selected and confirmed
             });
 
             // car-selection-dropdown change listener
@@ -916,7 +957,9 @@
             
             document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
 
-            // Initial rendering of car selection dropdown
+            // Initial rendering of car selection dropdown (will be empty if no cars yet)
+            // This is called initially to populate the dropdown even before main content is shown
+            // so that if a user clicks old user, the dropdown is ready.
             renderCarSelectionDropdown();
         });
     </script>
@@ -1018,12 +1061,27 @@
         </div>
     </div>
 
+    <div id="auth-screen" class="fixed inset-0 bg-gray-100 flex flex-col items-center justify-center z-50 p-4 hidden">
+        <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-md w-full">
+            <h2 class="text-3xl font-bold text-[#6E7C7C] mb-4">ورود یا ثبت‌نام</h2>
+            <p class="text-gray-700 mb-6">برای ادامه، لطفا وارد شوید یا یک حساب کاربری جدید ایجاد کنید.</p>
+            <div class="space-y-4 mb-6">
+                <input type="email" id="authEmail" placeholder="ایمیل" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="authPassword" placeholder="رمز عبور" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex flex-col md:flex-row gap-4">
+                <button onclick="loginUser()" class="bg-green-600 text-white py-3 px-8 rounded-lg text-lg hover:bg-green-700 transition-colors duration-200 flex-1">ورود</button>
+                <button onclick="registerUser()" class="bg-purple-600 text-white py-3 px-8 rounded-lg text-lg hover:bg-purple-700 transition-colors duration-200 flex-1">ثبت‌نام</button>
+            </div>
+        </div>
+    </div>
+
     <div id="main-app-content" class="hidden">
         <div class="container mx-auto mt-8">
             <header class="text-center mb-8">
                 <h1 class="text-3xl md:text-4xl font-bold text-[#6E7C7C] mb-2">ردیاب سرویس خودرو</h1>
                 <p class="text-lg text-gray-600">مدیریت و پیگیری سرویس‌های چندین خودرو</p>
-                <!-- Removed userId display from UI -->
+                <button onclick="logoutUser()" class="mt-4 bg-gray-300 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-400 transition-colors duration-200">خروج</button>
             </header>
 
             <div id="status-message" class="hidden px-4 py-3 rounded-md mb-4 text-center" role="alert">
@@ -1149,10 +1207,6 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                     <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
-                    <div class="file-input-wrapper">
-                        <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
-                        <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
-                    </div>
                 </div>
                 <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
             </section>
