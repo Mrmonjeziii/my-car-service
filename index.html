@@ -9,6 +9,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
+    <!-- Persian Datepicker CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
+
+    <!-- jQuery (required by persian-datepicker) - Load first -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+    <!-- Persian Datepicker JS dependencies - Load after jQuery, before main module script -->
+    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
+    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
+
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -328,6 +338,19 @@
                 option.textContent = `${car.make} ${car.model} (${car.year})`;
                 dropdown.appendChild(option);
             });
+
+            // Add all available cars as options if they are not already user cars
+            allAvailableCars.forEach(car => {
+                // Ensure the car from allAvailableCars is not already in userCars
+                const isAlreadyUserCar = userCars.some(userCar => userCar.id === car.id);
+                if (!isAlreadyUserCar) {
+                    const option = document.createElement('option');
+                    option.value = car.id;
+                    option.textContent = `${car.make} ${car.model} (${car.year}) (افزودن به خودروهای من)`;
+                    dropdown.appendChild(option);
+                }
+            });
+
             if (selectedCarId) {
                 dropdown.value = selectedCarId;
             }
@@ -410,7 +433,7 @@
             const serviceMileageInput = document.getElementById('serviceMileage');
             const serviceTypeInput = document.getElementById('serviceType');
 
-            const date = serviceDateInput.value; // This will be in YYYY-MM-DD (Gregorian)
+            const date = serviceDateInput.value; // This will be inYYYY-MM-DD (Gregorian)
             const mileage = parseInt(serviceMileageInput.value);
             const type = serviceTypeInput.value;
 
@@ -422,7 +445,7 @@
             try {
                 const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
                 await addDoc(servicesCollectionRef, {
-                    date: date, // Store as Gregorian YYYY-MM-DD string
+                    date: date, // Store as GregorianYYYY-MM-DD string
                     mileage: mileage,
                     type: type,
                     timestamp: new Date() // For sorting
@@ -602,12 +625,16 @@
                 const carModel = selectedCar ? selectedCar.model.replace(/\s/g, '_') : 'UnknownCar';
                 const exportDate = new Date().toISOString().slice(0, 10); //YYYY-MM-DD
 
+                // Generate a 10-digit random ID
+                const uniqueId = Math.floor(Math.random() * 9000000000) + 1000000000;
+
                 const fileContent = {
                     appName: "CarServiceTracker",
                     version: "1.0",
                     carId: selectedCarId,
                     carModel: selectedCar.model,
                     exportDate: exportDate,
+                    fileUniqueId: uniqueId, // Add the unique ID to the file content
                     services: services
                 };
 
@@ -618,7 +645,7 @@
                 if (link.download !== undefined) {
                     const url = URL.createObjectURL(blob);
                     link.setAttribute('href', url);
-                    link.setAttribute('download', `${carModel}_${exportDate}.carservice`);
+                    link.setAttribute('download', `${uniqueId}_${exportDate}.carservice`); // Filename: [ID]_[DATE].carservice
                     link.style.visibility = 'hidden';
                     document.body.appendChild(link);
                     link.click();
@@ -666,6 +693,9 @@
                 return;
             }
 
+            // Display loading message for file upload
+            displayStatusMessage('فایل در حال بارگذاری است...', 'info');
+
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const fileContent = e.target.result;
@@ -676,7 +706,7 @@
 
         // Renamed from importServicesFromCSV to importServicesFromFile
         const importServicesFromFile = async (fileContent) => {
-            displayStatusMessage('در حال بارگذاری و جایگزینی اطلاعات...', 'info');
+            // Loading message is already displayed by handleFileUpload
             
             try {
                 const parsedData = JSON.parse(fileContent);
@@ -685,6 +715,20 @@
                 if (parsedData.appName !== "CarServiceTracker" || !parsedData.services || !Array.isArray(parsedData.services)) {
                     displayStatusMessage('فرمت فایل سرویس نامعتبر است. لطفا فایل صحیح را بارگذاری کنید.', 'error');
                     return;
+                }
+
+                // Initialize Firebase if not already done (for old user flow)
+                if (!app) {
+                    initFirebase(); // This will also handle auth and loadCars
+                    // Wait for Firebase to be ready
+                    await new Promise(resolve => {
+                        const checkReady = setInterval(() => {
+                            if (isAuthReady) {
+                                clearInterval(checkReady);
+                                resolve();
+                            }
+                        }, 100);
+                    });
                 }
 
                 // Optional: Check if carId in file matches selectedCarId
@@ -699,6 +743,43 @@
                         displayStatusMessage('بارگذاری فایل لغو شد.', 'info');
                         return;
                     }
+                }
+
+                // If no car is selected but file has carId, try to select it
+                if (!selectedCarId && parsedData.carId) {
+                    selectedCarId = parsedData.carId; // Set selected car ID from file
+                    // Ensure this car exists in userCars. If not, add it.
+                    let carExistsInUserCars = userCars.some(car => car.id === selectedCarId);
+                    if (!carExistsInUserCars) {
+                        const carDataFromFile = allAvailableCars.find(car => car.id === selectedCarId);
+                        if (carDataFromFile) {
+                            const carsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars`);
+                            await setDoc(doc(carsCollectionRef, carDataFromFile.id), {
+                                make: carDataFromFile.make,
+                                model: carDataFromFile.model,
+                                year: carDataFromFile.year,
+                                engine: carDataFromFile.engine,
+                                initialMileage: 0,
+                                createdAt: new Date()
+                            });
+                            // Reload cars to update userCars array with the new car
+                            await new Promise(resolve => {
+                                const checkCarsLoaded = setInterval(() => {
+                                    if (userCars.some(car => car.id === selectedCarId)) {
+                                        clearInterval(checkCarsLoaded);
+                                        resolve();
+                                    }
+                                }, 100);
+                                loadCars(); // Trigger reload
+                            });
+                        } else {
+                            displayStatusMessage('خودروی موجود در فایل یافت نشد. لطفا ابتدا خودرو را اضافه کنید.', 'error');
+                            return;
+                        }
+                    }
+                } else if (!selectedCarId && !parsedData.carId) {
+                     displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید یا فایلی با اطلاعات خودرو بارگذاری کنید.', 'error');
+                     return;
                 }
 
                 const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
@@ -722,7 +803,7 @@
                 for (const service of newServices) {
                     // Ensure timestamp is a Date object for Firestore
                     service.timestamp = new Date(service.timestamp || service.date); 
-                    addBatch.add(servicesCollectionRef, service); // Use add for auto-generated ID
+                    addBatch.set(doc(servicesCollectionRef), service); // Corrected: use set with doc for auto-ID
                     batchCount++;
                     if (batchCount === 499) {
                         await addBatch.commit();
@@ -738,6 +819,9 @@
                 // Hide welcome screen and show main content after successful import
                 document.getElementById('welcome-screen').classList.add('hidden');
                 document.getElementById('main-app-content').classList.remove('hidden');
+                // Ensure dropdown reflects selected car from file
+                document.getElementById('car-selection-dropdown').value = selectedCarId;
+                handleCarSelection(); // Trigger UI update for the newly loaded services
 
             } catch (e) {
                 console.error("Error importing services from file: ", e);
