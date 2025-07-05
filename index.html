@@ -26,9 +26,16 @@
         import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, getDocs, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const appId = "1:567971291451:web:1074839fd834cfc7a6571e"; // Your actual Firebase App ID
+        const firebaseConfig = { // Your Firebase configuration
+            apiKey: "AIzaSyDkKCyFV2zZlk1dGTViCRoMCJPbzEvaWMY",
+            authDomain: "car-service-tracker-app-9f4ec.firebaseapp.com",
+            projectId: "car-service-tracker-app-9f4ec",
+            storageBucket: "car-service-tracker-app-9f4ec.firebasestorage.app",
+            messagingSenderId: "567971291451",
+            appId: "1:567971291451:web:1074839fd834cfc7a6571e"
+        };
+        const initialAuthToken = null; // This token is specific to Canvas environment, set to null for GitHub Pages
 
         let app;
         let db;
@@ -37,6 +44,61 @@
         let isAuthReady = false;
         let selectedCarId = null;
         let userCars = []; // Array to store car objects for the current user
+
+        // Comprehensive list of popular cars in Iran (Iranian, Chinese, common foreign)
+        const allAvailableCars = [
+            // Iranian Cars
+            { id: 'ikco-samand', make: 'ایران خودرو', model: 'سمند', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-dena', make: 'ایران خودرو', model: 'دنا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-runna', make: 'ایران خودرو', model: 'رانا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-soren', make: 'ایران خودرو', model: 'سورن', year: 'متنوع', engine: 'متنوع' },
+            { id: 'saipa-pride', make: 'سایپا', model: 'پراید', year: 'متنوع', engine: 'متنوع' },
+            { id: 'saipa-tiba', make: 'سایپا', model: 'تیبا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'saipa-saina', make: 'سایپا', model: 'ساینا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'saipa-quik', make: 'سایپا', model: 'کوییک', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-peugeot206', make: 'ایران خودرو', model: 'پژو ۲۰۶', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-peugeot207', make: 'ایران خودرو', model: 'پژو ۲۰۷', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-peugeotpars', make: 'ایران خودرو', model: 'پژو پارس', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-peugeot405', make: 'ایران خودرو', model: 'پژو ۴۰۵', year: 'متنوع', engine: 'متنوع' },
+            { id: 'ikco-arisan', make: 'ایران خودرو', model: 'آریسان', year: 'متنوع', engine: 'متنوع' },
+            { id: 'bahman-mazda3', make: 'بهمن موتور', model: 'مزدا ۳', year: 'متنوع', engine: 'متنوع' },
+            { id: 'kerman-jacj4', make: 'کرمان موتور', model: 'جک J4', year: 'متنوع', engine: 'متنوع' },
+            { id: 'kerman-jacs5', make: 'کرمان موتور', model: 'جک S5', year: 'متنوع', engine: 'متنوع' },
+            { id: 'modiran-mvmx33', make: 'مدیران خودرو', model: 'ام‌وی‌ام X33', year: 'متنوع', engine: 'متنوع' },
+            { id: 'modiran-mvm315', make: 'مدیران خودرو', model: 'ام‌وی‌ام ۳۱۵', year: 'متنوع', engine: 'متنوع' },
+            { id: 'modiran-cherytiggo', make: 'مدیران خودرو', model: 'چری تیگو', year: 'متنوع', engine: 'متنوع' },
+            { id: 'modiran-cheryarrizo', make: 'مدیران خودرو', model: 'چری آریزو', year: 'متنوع', engine: 'متنوع' },
+            // Chinese Cars
+            { id: 'chery-tiggo7', make: 'چری', model: 'تیگو ۷', year: 'متنوع', engine: 'متنوع' },
+            { id: 'chery-tiggo8', make: 'چری', model: 'تیگو ۸', year: 'متنوع', engine: 'متنوع' },
+            { id: 'chery-arrizo5', make: 'چری', model: 'آریزو ۵', year: 'متنوع', engine: 'متنوع' },
+            { id: 'chery-arrizo6', make: 'چری', model: 'آریزو ۶', year: 'متنوع', engine: 'متنوع' },
+            { id: 'jac-j5', make: 'جک', model: 'J5', year: 'متنوع', engine: 'متنوع' },
+            { id: 'jac-s3', make: 'جک', model: 'S3', year: 'متنوع', engine: 'متنوع' },
+            { id: 'jac-s4', make: 'جک', model: 'S4', year: 'متنوع', engine: 'متنوع' },
+            { id: 'lifan-x60', make: 'لیفان', model: 'X60', year: 'متنوع', engine: 'متنوع' },
+            { id: 'lifan-820', make: 'لیفان', model: '820', year: 'متنوع', engine: 'متنوع' },
+            { id: 'geely-emgrand7', make: 'جیلی', model: 'امگرند 7', year: 'متنوع', engine: 'متنوع' },
+            { id: 'haval-h2', make: 'هاوال', model: 'H2', year: 'متنوع', engine: 'متنوع' },
+            { id: 'byd-s6', make: 'بی‌وای‌دی', model: 'S6', year: 'متنوع', engine: 'متنوع' },
+            // Common Foreign Cars (older/used market)
+            { id: 'hyundai-verna', make: 'هیوندای', model: 'ورنا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'hyundai-elantra', make: 'هیوندای', model: 'النترا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'hyundai-sonata', make: 'هیوندای', model: 'سوناتا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'hyundai-tucson', make: 'هیوندای', model: 'توسان', year: 'متنوع', engine: 'متنوع' },
+            { id: 'kia-rio', make: 'کیا', model: 'ریو', year: 'متنوع', engine: 'متنوع' },
+            { id: 'kia-cerato', make: 'کیا', model: 'سراتو', year: 'متنوع', engine: 'متنوع' },
+            { id: 'kia-sportage', make: 'کیا', model: 'اسپورتیج', year: 'متنوع', engine: 'متنوع' },
+            { id: 'toyota-corolla', make: 'تویوتا', model: 'کرولا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'toyota-camry', make: 'تویوتا', model: 'کمری', year: 'متنوع', engine: 'متنوع' },
+            { id: 'renault-t90', make: 'رنو', model: 'تندر ۹۰', year: 'متنوع', engine: 'متنوع' },
+            { id: 'renault-megane', make: 'رنو', model: 'مگان', year: 'متنوع', engine: 'متنوع' },
+            { id: 'nissan-maxima', make: 'نیسان', model: 'ماکسیما', year: 'متنوع', engine: 'متنوع' },
+            { id: 'nissan-patrol', make: 'نیسان', model: 'پاترول', year: 'متنوع', engine: 'متنوع' },
+            { id: 'mitsubishi-lancer', make: 'میتسوبیشی', model: 'لنسر', year: 'متنوع', engine: 'متنوع' },
+            { id: 'suzuki-vitara', make: 'سوزوکی', model: 'ویتارا', year: 'متنوع', engine: 'متنوع' },
+            { id: 'volkswagen-golf', make: 'فولکس‌واگن', model: 'گلف', year: 'متنوع', engine: 'متنوع' },
+        ];
 
         // Service descriptions for tooltip/popover
         const serviceDetails = {
@@ -215,7 +277,9 @@
                 await deleteDoc(carDocRef);
                 displayStatusMessage('خودرو با موفقیت حذف شد!', 'success');
                 selectedCarId = null; // Clear selected car
-                document.getElementById('car-selection-dropdown').value = ''; // Reset dropdown
+                // document.getElementById('car-selection-dropdown').value = ''; // Reset dropdown
+                document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.'; // Reset selected car display
+                document.getElementById('car-search-input').value = ''; // Clear search input
                 document.getElementById('service-sections').classList.add('hidden'); // Hide service sections
                 loadCars(); // Reload cars
             } catch (e) {
@@ -235,19 +299,28 @@
                 snapshot.forEach((doc) => {
                     userCars.push({ id: doc.id, ...doc.data() });
                 });
-                renderCarSelection();
+                renderCarSelectionList(allAvailableCars); // Render all available cars for search
                 if (userCars.length > 0 && !selectedCarId) {
                     selectedCarId = userCars[0].id; // Auto-select the first car
-                    document.getElementById('car-selection-dropdown').value = selectedCarId;
+                    const selectedCar = userCars.find(car => car.id === selectedCarId);
+                    if (selectedCar) {
+                        document.getElementById('selected-car-display').textContent = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                        document.getElementById('car-search-input').value = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                    }
                     handleCarSelection(); // Trigger update for the first car
                 } else if (userCars.length === 0) {
                     selectedCarId = null;
-                    document.getElementById('car-selection-dropdown').innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
+                    document.getElementById('selected-car-display').textContent = 'هیچ خودرویی انتخاب نشده است.';
+                    document.getElementById('car-search-input').value = '';
                     document.getElementById('service-sections').classList.add('hidden');
                 } else if (selectedCarId && !userCars.some(car => car.id === selectedCarId)) {
                     // If previously selected car was deleted
                     selectedCarId = userCars[0].id;
-                    document.getElementById('car-selection-dropdown').value = selectedCarId;
+                    const selectedCar = userCars.find(car => car.id === selectedCarId);
+                    if (selectedCar) {
+                        document.getElementById('selected-car-display').textContent = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                        document.getElementById('car-search-input').value = `${selectedCar.make} ${selectedCar.model} (${selectedCar.year})`;
+                    }
                     handleCarSelection();
                 }
             }, (error) => {
@@ -256,22 +329,50 @@
             });
         };
 
-        const renderCarSelection = () => {
-            const dropdown = document.getElementById('car-selection-dropdown');
-            dropdown.innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
-            userCars.forEach(car => {
-                const option = document.createElement('option');
-                option.value = car.id;
-                option.textContent = `${car.make} ${car.model} (${car.year})`;
-                dropdown.appendChild(option);
-            });
-            if (selectedCarId) {
-                dropdown.value = selectedCarId;
+        const renderCarSelectionList = (carsToRender) => {
+            const carListUl = document.getElementById('car-list-ul');
+            carListUl.innerHTML = '';
+            if (carsToRender.length === 0) {
+                carListUl.innerHTML = '<li class="p-2 text-gray-500">خودرویی یافت نشد.</li>';
+                return;
             }
+            carsToRender.forEach(car => {
+                const li = document.createElement('li');
+                li.className = 'p-2 hover:bg-blue-100 cursor-pointer';
+                li.textContent = `${car.make} ${car.model} (${car.year})`;
+                li.dataset.carId = car.id; // Store original ID
+                li.addEventListener('click', () => selectCarFromList(car));
+                carListUl.appendChild(li);
+            });
+        };
+
+        const selectCarFromList = (car) => {
+            selectedCarId = car.id;
+            document.getElementById('selected-car-display').textContent = `${car.make} ${car.model} (${car.year})`;
+            document.getElementById('car-search-input').value = `${car.make} ${car.model} (${car.year})`;
+            document.getElementById('car-search-results').classList.add('hidden');
+            handleCarSelection(); // Trigger update for the newly selected car
+        };
+
+        window.searchCars = () => {
+            const searchTerm = document.getElementById('car-search-input').value.toLowerCase();
+            const filteredCars = allAvailableCars.filter(car => 
+                car.make.toLowerCase().includes(searchTerm) || 
+                car.model.toLowerCase().includes(searchTerm)
+            );
+            renderCarSelectionList(filteredCars);
+            document.getElementById('car-search-results').classList.remove('hidden');
+        };
+
+        window.hideSearchResults = () => {
+            // Delay hiding to allow click event on list items to fire
+            setTimeout(() => {
+                document.getElementById('car-search-results').classList.add('hidden');
+            }, 200);
         };
 
         window.handleCarSelection = () => {
-            selectedCarId = document.getElementById('car-selection-dropdown').value;
+            // This function is called when a car is selected from the dropdown or auto-selected
             if (selectedCarId) {
                 document.getElementById('service-sections').classList.remove('hidden');
                 loadServices(); // Load services for the newly selected car
@@ -706,11 +807,16 @@
             // Event listener for the "بارگذاری فایل" button (old user)
             document.getElementById('old-user-button').addEventListener('click', () => {
                 document.getElementById('csvFileInput').click(); // Programmatically click the hidden file input
-                initFirebase(); // Initialize Firebase when old user attempts to load file
+                // Firebase will be initialized by handleFileUpload if a file is selected and confirmed
             });
 
+            document.getElementById('car-search-input').addEventListener('input', window.searchCars);
+            document.getElementById('car-search-input').addEventListener('focus', window.searchCars); // Show results on focus
+            document.getElementById('car-search-input').addEventListener('blur', window.hideSearchResults);
+
             document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
-            document.getElementById('car-selection-dropdown').addEventListener('change', window.handleCarSelection);
+            // car-selection-dropdown is replaced, its change listener is no longer needed directly here
+            // selection is handled by selectCarFromList now which calls handleCarSelection
 
             // Initialize Persian Datepicker
             // Ensure jQuery is loaded before initializing datepicker
@@ -744,9 +850,6 @@
             });
         });
     </script>
-    <!-- Persian Datepicker JS (must be loaded after jQuery and persian-date) -->
-    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
-    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
     <style>
         body {
             font-family: 'Vazirmatn', sans-serif;
@@ -859,11 +962,20 @@
 
             <section id="car-management" class="card mb-8">
                 <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">مدیریت خودروها</h2>
+                <div class="mb-4 relative">
+                    <label for="car-search-input" class="block text-sm font-medium text-gray-700 mb-1">جستجو و انتخاب خودرو:</label>
+                    <input type="text" id="car-search-input" placeholder="برند یا مدل خودرو را جستجو کنید..." 
+                           class="focus:ring-blue-500 focus:border-blue-500" 
+                           oninput="searchCars()" onfocus="searchCars()" onblur="hideSearchResults()">
+                    <div id="car-search-results" class="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-60 overflow-y-auto hidden">
+                        <ul id="car-list-ul">
+                            <!-- Cars will be populated here by JavaScript -->
+                        </ul>
+                    </div>
+                </div>
                 <div class="mb-4">
-                    <label for="car-selection-dropdown" class="block text-sm font-medium text-gray-700 mb-1">انتخاب خودرو:</label>
-                    <select id="car-selection-dropdown" class="focus:ring-blue-500 focus:border-blue-500">
-                        <option value="">در حال بارگذاری خودروها...</option>
-                    </select>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">خودروی انتخاب شده:</label>
+                    <p id="selected-car-display" class="text-lg font-semibold text-gray-800 p-2 bg-gray-100 rounded-md">هیچ خودرویی انتخاب نشده است.</p>
                 </div>
                 <div class="flex flex-col md:flex-row gap-4 mb-6">
                     <button onclick="document.getElementById('add-car-form').classList.toggle('hidden')" class="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex-1">افزودن خودرو جدید</button>
