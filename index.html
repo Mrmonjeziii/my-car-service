@@ -3,11 +3,729 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ردیاب سرویس خودرو هیوندای ورنا</title>
+    <title>ردیاب سرویس خودرو (چند خودرویی و آنلاین)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Persian Datepicker CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css"/>
+
+    <!-- jQuery (required by persian-datepicker) -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, getDocs, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+        let selectedCarId = null;
+        let userCars = []; // Array to store car objects for the current user
+
+        // Service descriptions for tooltip/popover
+        const serviceDetails = {
+            "Oil Change": {
+                interval: "هر ۵,۰۰۰ کیلومتر یا ۶ ماه",
+                description: "تعویض روغن موتور و فیلتر روغن. این کار برای روان‌کاری قطعات موتور و جلوگیری از فرسایش حیاتی است."
+            },
+            "Minor Service": {
+                interval: "هر ۱۰,۰۰۰ کیلومتر یا ۱۲ ماه",
+                description: "شامل تعویض روغن و فیلتر روغن، فیلتر هوا، فیلتر کابین و بررسی کلی سیستم‌های خودرو مانند ترمز، تعلیق و مایعات. این سرویس برای حفظ عملکرد بهینه و شناسایی مشکلات اولیه ضروری است."
+            },
+            "Major Service": {
+                interval: "هر ۲۰,۰۰۰ تا ۴۰,۰۰۰ کیلومتر یا ۲۴ ماه",
+                description: "یک سرویس جامع‌تر که علاوه بر موارد سرویس کوچک، شامل تعویض مایع خنک‌کننده، بررسی و تعویض شمع‌ها (در صورت نیاز)، بررسی کامل لنت و دیسک ترمز، و بازدید دقیق تسمه‌ها و سیستم تعلیق است. برای اطمینان از سلامت بلندمدت خودرو حیاتی است."
+            },
+            "Transmission Fluid": {
+                interval: "هر ۴۰,۰۰۰ تا ۶۰,۰۰۰ کیلومتر",
+                description: "تعویض روغن گیربکس. استفاده از روغن با مشخصات دقیق توصیه شده توسط سازنده برای جلوگیری از مشکلات گیربکس بسیار مهم است."
+            },
+            "Brake Service": {
+                interval: "بر اساس فرسایش (معمولاً هر ۲۰,۰۰۰ تا ۴۰,۰۰۰ کیلومتر)",
+                description: "بررسی و تعویض لنت‌ها و دیسک‌های ترمز. همچنین بررسی سطح و کیفیت روغن ترمز. برای ایمنی خودرو بسیار حیاتی است."
+            },
+            "Other": {
+                interval: "بر اساس نیاز",
+                description: "سایر سرویس‌ها و تعمیرات متفرقه که ممکن است بر اساس نیاز خودرو یا توصیه‌های مکانیک انجام شود."
+            }
+        };
+
+        // Custom Confirmation Modal Logic
+        const confirmationModal = document.getElementById('confirmationModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalMessage = document.getElementById('modalMessage');
+        const modalConfirmBtn = document.getElementById('modalConfirmBtn');
+        const modalCancelBtn = document.getElementById('modalCancelBtn');
+
+        let resolveModalPromise;
+
+        function showConfirmationModal(title, message) {
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            confirmationModal.classList.remove('hidden');
+
+            return new Promise((resolve) => {
+                resolveModalPromise = resolve;
+            });
+        }
+
+        modalConfirmBtn.addEventListener('click', () => {
+            confirmationModal.classList.add('hidden');
+            resolveModalPromise(true);
+        });
+
+        modalCancelBtn.addEventListener('click', () => {
+            confirmationModal.classList.add('hidden');
+            resolveModalPromise(false);
+        });
+
+        // Helper function to display status messages
+        const displayStatusMessage = (message, type = 'info') => {
+            const statusMessageElem = document.getElementById('status-message');
+            statusMessageElem.textContent = message;
+            statusMessageElem.classList.remove('hidden', 'bg-red-100', 'border-red-400', 'text-red-700', 'bg-green-100', 'border-green-400', 'text-green-700', 'bg-blue-100', 'border-blue-400', 'text-blue-700');
+            if (type === 'error') {
+                statusMessageElem.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+            } else if (type === 'success') {
+                statusMessageElem.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+            } else { // info
+                statusMessageElem.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+            }
+            setTimeout(() => { statusMessageElem.classList.add('hidden'); }, 5000); // Auto-hide after 5 seconds
+        };
+
+        // Initialize Firebase and set up authentication
+        const initFirebase = async () => {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Authenticated with user ID:", userId);
+                        document.getElementById('user-id-display').textContent = `شناسه کاربری: ${userId}`;
+                        isAuthReady = true;
+                        loadCars(); // Load cars after auth is ready
+                    } else {
+                        console.log("No user signed in. Attempting anonymous sign-in.");
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (anonError) {
+                            console.error("Anonymous sign-in failed:", anonError);
+                            displayStatusMessage('خطا در ورود به سیستم. لطفا دوباره تلاش کنید.', 'error');
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                displayStatusMessage('خطا در بارگذاری فایربیس. لطفا صفحه را رفرش کنید.', 'error');
+            }
+        };
+
+        // --- Car Management Functions ---
+        window.addCar = async () => {
+            if (!isAuthReady || !userId) {
+                displayStatusMessage('در حال آماده‌سازی سیستم... لطفا صبر کنید.', 'info');
+                return;
+            }
+
+            const make = document.getElementById('carMake').value;
+            const model = document.getElementById('carModel').value;
+            const year = parseInt(document.getElementById('carYear').value);
+            const engine = document.getElementById('carEngine').value;
+            const initialMileage = parseInt(document.getElementById('carInitialMileage').value);
+
+            if (!make || !model || isNaN(year) || year < 1900 || !engine || isNaN(initialMileage) || initialMileage < 0) {
+                displayStatusMessage('لطفا تمام اطلاعات خودرو را به درستی پر کنید.', 'error');
+                return;
+            }
+
+            try {
+                const carsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars`);
+                const newCarRef = doc(carsCollectionRef); // Get a new doc reference with auto-generated ID
+                await setDoc(newCarRef, {
+                    make: make,
+                    model: model,
+                    year: year,
+                    engine: engine,
+                    initialMileage: initialMileage,
+                    createdAt: new Date()
+                });
+                displayStatusMessage('خودرو با موفقیت اضافه شد!', 'success');
+                document.getElementById('carMake').value = '';
+                document.getElementById('carModel').value = '';
+                document.getElementById('carYear').value = '';
+                document.getElementById('carEngine').value = '';
+                document.getElementById('carInitialMileage').value = '';
+                loadCars(); // Reload cars to update dropdown
+            } catch (e) {
+                console.error("Error adding car: ", e);
+                displayStatusMessage('خطا در افزودن خودرو.', 'error');
+            }
+        };
+
+        window.deleteCar = async () => {
+            if (!isAuthReady || !userId || !selectedCarId) {
+                displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید.', 'error');
+                return;
+            }
+
+            const confirmed = await showConfirmationModal(
+                'حذف خودرو',
+                `آیا مطمئن هستید که می‌خواهید خودروی انتخاب شده و تمامی سرویس‌های آن را حذف کنید؟`
+            );
+
+            if (!confirmed) {
+                displayStatusMessage('حذف خودرو لغو شد.', 'info');
+                return;
+            }
+
+            try {
+                const carDocRef = doc(db, `artifacts/${appId}/users/${userId}/cars`, selectedCarId);
+                // Delete all services sub-collection first (Firestore doesn't auto-delete sub-collections)
+                const servicesSnapshot = await getDocs(collection(carDocRef, 'services'));
+                const batch = writeBatch(db);
+                servicesSnapshot.forEach((sDoc) => {
+                    batch.delete(sDoc.ref);
+                });
+                await batch.commit();
+
+                await deleteDoc(carDocRef);
+                displayStatusMessage('خودرو با موفقیت حذف شد!', 'success');
+                selectedCarId = null; // Clear selected car
+                document.getElementById('car-selection-dropdown').value = ''; // Reset dropdown
+                document.getElementById('service-sections').classList.add('hidden'); // Hide service sections
+                loadCars(); // Reload cars
+            } catch (e) {
+                console.error("Error deleting car: ", e);
+                displayStatusMessage('خطا در حذف خودرو.', 'error');
+            }
+        };
+
+        const loadCars = () => {
+            if (!db || !userId) return;
+
+            const carsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars`);
+            const q = query(carsCollectionRef, orderBy("createdAt", "asc"));
+
+            onSnapshot(q, (snapshot) => {
+                userCars = [];
+                snapshot.forEach((doc) => {
+                    userCars.push({ id: doc.id, ...doc.data() });
+                });
+                renderCarSelection();
+                if (userCars.length > 0 && !selectedCarId) {
+                    selectedCarId = userCars[0].id; // Auto-select the first car
+                    document.getElementById('car-selection-dropdown').value = selectedCarId;
+                    handleCarSelection(); // Trigger update for the first car
+                } else if (userCars.length === 0) {
+                    selectedCarId = null;
+                    document.getElementById('car-selection-dropdown').innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
+                    document.getElementById('service-sections').classList.add('hidden');
+                } else if (selectedCarId && !userCars.some(car => car.id === selectedCarId)) {
+                    // If previously selected car was deleted
+                    selectedCarId = userCars[0].id;
+                    document.getElementById('car-selection-dropdown').value = selectedCarId;
+                    handleCarSelection();
+                }
+            }, (error) => {
+                console.error("Error fetching cars: ", error);
+                displayStatusMessage('خطا در بارگذاری لیست خودروها.', 'error');
+            });
+        };
+
+        const renderCarSelection = () => {
+            const dropdown = document.getElementById('car-selection-dropdown');
+            dropdown.innerHTML = '<option value="">خودرویی انتخاب نشده است</option>';
+            userCars.forEach(car => {
+                const option = document.createElement('option');
+                option.value = car.id;
+                option.textContent = `${car.make} ${car.model} (${car.year})`;
+                dropdown.appendChild(option);
+            });
+            if (selectedCarId) {
+                dropdown.value = selectedCarId;
+            }
+        };
+
+        window.handleCarSelection = () => {
+            selectedCarId = document.getElementById('car-selection-dropdown').value;
+            if (selectedCarId) {
+                document.getElementById('service-sections').classList.remove('hidden');
+                loadServices(); // Load services for the newly selected car
+            } else {
+                document.getElementById('service-sections').classList.add('hidden');
+            }
+        };
+
+        // --- Service Management Functions (modified for selectedCarId) ---
+        window.addService = async () => {
+            if (!isAuthReady || !userId || !selectedCarId) {
+                displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید.', 'error');
+                return;
+            }
+
+            const serviceDateInput = document.getElementById('serviceDate');
+            const serviceMileageInput = document.getElementById('serviceMileage');
+            const serviceTypeInput = document.getElementById('serviceType');
+
+            // Get Shamsi date from datepicker, then convert to GregorianYYYY-MM-DD
+            const persianDateString = serviceDateInput.value; // e.g., "1402/04/15"
+            let gregorianDateString;
+            try {
+                // This conversion relies on the persian-date library
+                const pDate = new persianDate([parseInt(persianDateString.substring(0,4)), parseInt(persianDateString.substring(5,7)), parseInt(persianDateString.substring(8,10))]);
+                gregorianDateString = pDate.toGregorian().format('YYYY-MM-DD');
+            } catch (e) {
+                console.error("Error converting Persian date:", e);
+                displayStatusMessage('فرمت تاریخ شمسی وارد شده صحیح نیست. (مثال: 1402/01/15)', 'error');
+                return;
+            }
+
+            const mileage = parseInt(serviceMileageInput.value);
+            const type = serviceTypeInput.value;
+
+            if (!persianDateString || isNaN(mileage) || mileage <= 0 || !type) {
+                displayStatusMessage('لطفا تمام فیلدها را به درستی پر کنید.', 'error');
+                return;
+            }
+
+            try {
+                const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
+                await addDoc(servicesCollectionRef, {
+                    date: gregorianDateString, // Store as GregorianYYYY-MM-DD string
+                    mileage: mileage,
+                    type: type,
+                    timestamp: new Date() // For sorting
+                });
+                serviceDateInput.value = '';
+                serviceMileageInput.value = '';
+                serviceTypeInput.value = 'Oil Change';
+                displayStatusMessage('سرویس با موفقیت ثبت شد!', 'success');
+            } catch (e) {
+                console.error("Error adding service: ", e);
+                displayStatusMessage('خطا در ثبت سرویس.', 'error');
+            }
+        };
+
+        window.deleteService = async (id) => {
+            if (!isAuthReady || !userId || !selectedCarId) {
+                displayStatusMessage('سیستم آماده نیست. لطفا صبر کنید.', 'info');
+                return;
+            }
+            try {
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`, id));
+                displayStatusMessage('سرویس با موفقیت حذف شد!', 'success');
+            } catch (e) {
+                console.error("Error deleting service: ", e);
+                displayStatusMessage('خطا در حذف سرویس.', 'error');
+            }
+        };
+
+        const loadServices = () => {
+            if (!db || !userId || !selectedCarId) {
+                renderServices([]); // Clear table if no car selected
+                calculateNextService([]);
+                updateCarStatus(null);
+                return;
+            }
+
+            const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
+            const q = query(servicesCollectionRef, orderBy("timestamp", "desc"));
+
+            onSnapshot(q, (snapshot) => {
+                const services = [];
+                snapshot.forEach((doc) => {
+                    services.push({ id: doc.id, ...doc.data() });
+                });
+                renderServices(services);
+                calculateNextService(services);
+            }, (error) => {
+                console.error("Error fetching services: ", error);
+                displayStatusMessage('خطا در بارگذاری تاریخچه سرویس‌ها.', 'error');
+            });
+        };
+
+        const renderServices = (services) => {
+            const serviceHistoryBody = document.getElementById('serviceHistoryBody');
+            serviceHistoryBody.innerHTML = '';
+            if (services.length === 0) {
+                serviceHistoryBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">هیچ سرویسی برای این خودرو ثبت نشده است.</td></tr>`;
+                return;
+            }
+            services.forEach(service => {
+                // Convert Gregorian date string to Date object, then to Persian string
+                const persianDate = new Date(service.date).toLocaleDateString('fa-IR', { calendar: 'persian' });
+                const row = document.createElement('tr');
+                row.className = 'border-b border-gray-200 hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="py-3 px-4">${persianDate}</td>
+                    <td class="py-3 px-4">${service.mileage.toLocaleString()} کیلومتر</td>
+                    <td class="py-3 px-4">${service.type}</td>
+                    <td class="py-3 px-4">
+                        <button onclick="deleteService('${service.id}')" class="bg-red-500 text-white px-3 py-1 rounded-md text-sm hover:bg-red-600 transition-colors duration-200">حذف</button>
+                    </td>
+                `;
+                serviceHistoryBody.appendChild(row);
+            });
+        };
+
+        const calculateNextService = (services) => {
+            const nextServiceDateElem = document.getElementById('nextServiceDate');
+            const nextServiceMileageElem = document.getElementById('nextServiceMileage');
+            const lastServiceInfoElem = document.getElementById('lastServiceInfo');
+
+            if (services.length === 0) {
+                nextServiceDateElem.textContent = '---';
+                nextServiceMileageElem.textContent = '---';
+                lastServiceInfoElem.textContent = 'هیچ سرویسی ثبت نشده است.';
+                updateCarStatus(null);
+                return;
+            }
+
+            const latestService = services[0];
+            const lastServiceDate = new Date(latestService.date); // This is a Gregorian Date object
+            const lastServiceMileage = latestService.mileage;
+
+            const lastServicePersianDate = lastServiceDate.toLocaleDateString('fa-IR', { calendar: 'persian' });
+            lastServiceInfoElem.textContent = `آخرین سرویس: ${lastServicePersianDate} در ${latestService.mileage.toLocaleString()} کیلومتر (${latestService.type})`;
+
+            const nextDateByTime = new Date(lastServiceDate);
+            nextDateByTime.setMonth(nextDateByTime.getMonth() + 6);
+
+            const nextMileageByKm = lastServiceMileage + 10000;
+
+            nextServiceDateElem.textContent = nextDateByTime.toLocaleDateString('fa-IR', { calendar: 'persian' });
+            nextServiceMileageElem.textContent = `${nextMileageByKm.toLocaleString()} کیلومتر`;
+
+            updateCarStatus(latestService);
+        };
+
+        const updateCarStatus = (latestService) => {
+            const carStatusElem = document.getElementById('carStatus');
+            const carStatusTextElem = document.getElementById('carStatusText');
+
+            carStatusElem.classList.remove('bg-green-100', 'border-green-400', 'text-green-700',
+                                    'bg-yellow-100', 'border-yellow-400', 'text-yellow-700',
+                                    'bg-red-100', 'border-red-400', 'text-red-700',
+                                    'bg-gray-100', 'border-gray-400', 'text-gray-700');
+
+            if (!latestService) {
+                carStatusTextElem.textContent = 'وضعیت خودرو: نامشخص';
+                carStatusElem.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-700');
+                return;
+            }
+
+            const today = new Date();
+            const lastServiceDate = new Date(latestService.date);
+            
+            const nextServiceDueDateByTime = new Date(lastServiceDate);
+            nextServiceDueDateByTime.setMonth(nextServiceDueDateByTime.getMonth() + 6);
+
+            let status = 'عالی';
+            let statusClass = 'bg-green-100 border-green-400 text-green-700';
+
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+
+            if (nextServiceDueDateByTime < thirtyDaysAgo) {
+                status = 'نیاز به توجه';
+                statusClass = 'bg-red-100 border-red-400 text-red-700';
+            } else if (nextServiceDueDateByTime < today) {
+                status = 'متوسط';
+                statusClass = 'bg-yellow-100 border-yellow-400 text-yellow-700';
+            } else {
+                const thirtyDaysFromNow = new Date();
+                thirtyDaysFromNow.setDate(today.getDate() + 30);
+                if (nextServiceDueDateByTime < thirtyDaysFromNow) {
+                    status = 'متوسط';
+                    statusClass = 'bg-yellow-100 border-yellow-400 text-yellow-700';
+                }
+            }
+            
+            carStatusTextElem.textContent = `وضعیت خودرو: ${status}`;
+            carStatusElem.classList.add(...statusClass.split(' '));
+        };
+
+        // Function to export services to custom JSON file
+        window.exportServicesToFile = async () => {
+            if (!isAuthReady || !userId || !selectedCarId) {
+                displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید.', 'error');
+                return;
+            }
+            displayStatusMessage('در حال آماده‌سازی فایل سرویس...', 'info');
+
+            try {
+                const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
+                const querySnapshot = await getDocs(query(servicesCollectionRef, orderBy("timestamp", "desc")));
+                const services = [];
+                querySnapshot.forEach((doc) => {
+                    services.push(doc.data());
+                });
+
+                if (services.length === 0) {
+                    displayStatusMessage('هیچ سرویسی برای خروجی گرفتن وجود ندارد.', 'info');
+                    return;
+                }
+
+                const selectedCar = userCars.find(c => c.id === selectedCarId);
+                const carModel = selectedCar ? selectedCar.model.replace(/\s/g, '_') : 'UnknownCar';
+                const exportDate = new Date().toISOString().slice(0, 10); //YYYY-MM-DD
+
+                const fileContent = {
+                    appName: "CarServiceTracker",
+                    version: "1.0",
+                    carId: selectedCarId,
+                    carModel: selectedCar.model,
+                    exportDate: exportDate,
+                    services: services
+                };
+
+                const jsonContent = JSON.stringify(fileContent, null, 2); // Pretty print JSON
+
+                const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+                const link = document.createElement('a');
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `${carModel}_${exportDate}.carservice`);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    displayStatusMessage('فایل سرویس با موفقیت دانلود شد.', 'success');
+                } else {
+                    displayStatusMessage('مرورگر شما از قابلیت دانلود مستقیم پشتیبانی نمی‌کند. لطفا محتوا را کپی کنید.', 'error');
+                }
+
+            } catch (e) {
+                console.error("Error exporting services: ", e);
+                displayStatusMessage('خطا در خروجی گرفتن سرویس‌ها.', 'error');
+            }
+        };
+
+        // Renamed from exportServicesToCSV to exportServicesToFile
+        window.exportServicesToCSV = window.exportServicesToFile;
+
+
+        window.handleFileUpload = async (event) => {
+            if (!isAuthReady || !userId || !selectedCarId) {
+                displayStatusMessage('لطفا ابتدا یک خودرو را انتخاب کنید.', 'error');
+                return;
+            }
+
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            // Check for custom file extension
+            if (!file.name.endsWith('.carservice')) {
+                displayStatusMessage('لطفا فقط فایل‌های با پسوند ".carservice" را بارگذاری کنید.', 'error');
+                document.getElementById('csvFileInput').value = '';
+                return;
+            }
+
+            const confirmed = await showConfirmationModal(
+                'تأیید بارگذاری فایل',
+                `با بارگذاری این فایل، تمامی اطلاعات سرویس‌های فعلی خودروی انتخاب شده حذف و با اطلاعات فایل جایگزین خواهد شد. آیا مطمئن هستید؟`
+            );
+
+            if (!confirmed) {
+                displayStatusMessage('بارگذاری فایل لغو شد.', 'info');
+                document.getElementById('csvFileInput').value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const fileContent = e.target.result;
+                await importServicesFromFile(fileContent);
+            };
+            reader.readAsText(file);
+        };
+
+        // Renamed from importServicesFromCSV to importServicesFromFile
+        const importServicesFromFile = async (fileContent) => {
+            displayStatusMessage('در حال بارگذاری و جایگزینی اطلاعات...', 'info');
+            
+            try {
+                const parsedData = JSON.parse(fileContent);
+
+                // Validate custom file structure
+                if (parsedData.appName !== "CarServiceTracker" || !parsedData.services || !Array.isArray(parsedData.services)) {
+                    displayStatusMessage('فرمت فایل سرویس نامعتبر است. لطفا فایل صحیح را بارگذاری کنید.', 'error');
+                    return;
+                }
+
+                // Optional: Check if carId in file matches selectedCarId
+                if (parsedData.carId && parsedData.carId !== selectedCarId) {
+                    const carInFile = userCars.find(c => c.id === parsedData.carId);
+                    const carNameInFile = carInFile ? `${carInFile.make} ${carInFile.model}` : 'خودرویی دیگر';
+                    const confirmMismatch = await showConfirmationModal(
+                        'عدم تطابق خودرو',
+                        `این فایل مربوط به خودروی "${carNameInFile}" است، اما شما خودروی دیگری را انتخاب کرده‌اید. آیا می‌خواهید اطلاعات را برای خودروی فعلی بارگذاری کنید؟ (توصیه می‌شود خودروی صحیح را انتخاب کنید.)`
+                    );
+                    if (!confirmMismatch) {
+                        displayStatusMessage('بارگذاری فایل لغو شد.', 'info');
+                        return;
+                    }
+                }
+
+                const servicesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/cars/${selectedCarId}/services`);
+                const currentServicesSnapshot = await getDocs(query(servicesCollectionRef));
+                
+                const batch = writeBatch(db);
+                currentServicesSnapshot.forEach((sDoc) => {
+                    batch.delete(sDoc.ref);
+                });
+                await batch.commit();
+
+                const newServices = parsedData.services;
+
+                if (newServices.length === 0) {
+                    displayStatusMessage('هیچ داده سرویس معتبری در فایل یافت نشد.', 'info');
+                    return;
+                }
+
+                const addBatch = writeBatch(db);
+                let batchCount = 0;
+                for (const service of newServices) {
+                    // Ensure timestamp is a Date object for Firestore
+                    service.timestamp = new Date(service.timestamp || service.date); 
+                    addBatch.add(servicesCollectionRef, service); // Use add for auto-generated ID
+                    batchCount++;
+                    if (batchCount === 499) {
+                        await addBatch.commit();
+                        addBatch = writeBatch(db);
+                        batchCount = 0;
+                    }
+                }
+                if (batchCount > 0) {
+                    await addBatch.commit();
+                }
+
+                displayStatusMessage('اطلاعات سرویس با موفقیت از فایل بارگذاری شد.', 'success');
+            } catch (e) {
+                console.error("Error importing services from file: ", e);
+                displayStatusMessage('خطا در بارگذاری فایل سرویس. لطفا از فرمت صحیح فایل اطمینان حاصل کنید.', 'error');
+            } finally {
+                document.getElementById('csvFileInput').value = '';
+            }
+        };
+
+
+        // Function to update the service description display based on selected type
+        window.updateServiceDescriptionDisplay = async () => {
+            const serviceTypeSelect = document.getElementById('serviceType');
+            const selectedType = serviceTypeSelect.value;
+            const descriptionDiv = document.getElementById('serviceTypeDescription');
+            
+            if (serviceDetails[selectedType]) {
+                const details = serviceDetails[selectedType];
+                descriptionDiv.innerHTML = `
+                    <p class="font-semibold text-gray-800 mb-1">${selectedType}:</p>
+                    <p class="text-sm text-gray-700">**دوره سرویس:** ${details.interval}</p>
+                    <p class="text-sm text-gray-700" id="llm-description-text"></p>
+                `;
+                descriptionDiv.classList.remove('hidden');
+
+                // Fetch LLM-generated description
+                const prompt = `چند نکته آموزشی کوتاه و مختصر در مورد سرویس خودرویی با عنوان "${selectedType}" و دوره سرویس "${details.interval}" ارائه دهید. این نکات باید شامل اهمیت، عملکرد اصلی، و یک توصیه کاربردی باشد. توضیحات باید در حد چند جمله کوتاه باشند.`;
+                const llmDescriptionTextElem = document.getElementById('llm-description-text');
+                llmDescriptionTextElem.innerHTML = `<span class="text-gray-500">در حال دریافت توضیحات هوشمند... <span class="animate-pulse">...</span></span>`;
+
+                try {
+                    let chatHistory = [];
+                    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                    const payload = { contents: chatHistory };
+                    const apiKey = ""; // Canvas will provide this
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const result = await response.json();
+
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        const llmText = result.candidates[0].content.parts[0].text;
+                        llmDescriptionTextElem.textContent = llmText;
+                    } else {
+                        llmDescriptionTextElem.textContent = details.description + ' (خطا در دریافت توضیحات هوشمند. نمایش توضیحات پیش‌فرض.)';
+                    }
+                } catch (error) {
+                    console.error("Error fetching LLM content:", error);
+                    llmDescriptionTextElem.textContent = details.description + ' (خطا در دریافت توضیحات هوشمند. نمایش توضیحات پیش‌فرض.)';
+                }
+
+            } else {
+                descriptionDiv.classList.add('hidden');
+                descriptionDiv.innerHTML = '';
+            }
+        };
+
+        // Initialize app when the window loads
+        window.addEventListener('load', () => {
+            initFirebase();
+            window.updateServiceDescriptionDisplay(); // Set initial description
+            document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
+            document.getElementById('car-selection-dropdown').addEventListener('change', window.handleCarSelection);
+
+            // Initialize Persian Datepicker
+            new persianDatepicker({
+                element: document.getElementById('serviceDate'),
+                altField: '#serviceDate', // Use the same input for altField to get Shamsi date
+                altFormat: 'YYYY/MM/DD',
+                initialValueType: 'persian',
+                format: 'YYYY/MM/DD',
+                calendar: {
+                    persian: {
+                        locale: 'fa'
+                    }
+                },
+                navigator: {
+                    enabled: true,
+                    scroll: {
+                        enabled: true
+                    },
+                    text: {
+                        btnNextText: 'بعدی',
+                        btnPrevText: 'قبلی'
+                    }
+                },
+                onSelect: function (selectedDate) {
+                    // The datepicker automatically updates the input field with Shamsi date
+                    // No explicit action needed here for saving, as addService will read it
+                }
+            });
+        });
+    </script>
+    <!-- Persian Datepicker JS (must be loaded after jQuery and persian-date) -->
+    <script src="https://unpkg.com/persian-date@1.1.0/dist/persian-date.min.js"></script>
+    <script src="https://unpkg.com/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
     <style>
         body {
             font-family: 'Vazirmatn', sans-serif;
@@ -23,7 +741,7 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-lg */
             padding: 1.5rem; /* p-6 */
         }
-        input[type="date"], input[type="number"], select {
+        input[type="date"], input[type="number"], input[type="text"], select {
             border: 1px solid #D1D5DB; /* gray-300 */
             border-radius: 0.5rem; /* rounded-md */
             padding: 0.75rem 1rem; /* py-2 px-3 */
@@ -94,96 +812,145 @@
 
     <div class="container mx-auto mt-8">
         <header class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-[#6E7C7C] mb-2">ردیاب سرویس هیوندای ورنا</h1>
-            <p class="text-lg text-gray-600">تاریخچه سرویس‌های خودروی خود را ثبت و سرویس بعدی را پیگیری کنید.</p>
+            <h1 class="text-3xl md:text-4xl font-bold text-[#6E7C7C] mb-2">ردیاب سرویس خودرو</h1>
+            <p class="text-lg text-gray-600">مدیریت و پیگیری سرویس‌های چندین خودرو</p>
+            <p id="user-id-display" class="text-xs text-gray-400 mt-2">شناسه کاربری: در حال بارگذاری...</p>
         </header>
 
         <div id="status-message" class="hidden px-4 py-3 rounded-md mb-4 text-center" role="alert">
+            <!-- Dynamic status messages will appear here -->
+        </div>
+
+        <section id="car-management" class="card mb-8">
+            <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">مدیریت خودروها</h2>
+            <div class="mb-4">
+                <label for="car-selection-dropdown" class="block text-sm font-medium text-gray-700 mb-1">انتخاب خودرو:</label>
+                <select id="car-selection-dropdown" class="focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">در حال بارگذاری خودروها...</option>
+                </select>
+            </div>
+            <div class="flex flex-col md:flex-row gap-4 mb-6">
+                <button onclick="document.getElementById('add-car-form').classList.toggle('hidden')" class="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex-1">افزودن خودرو جدید</button>
+                <button onclick="deleteCar()" class="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 flex-1">حذف خودرو انتخاب شده</button>
             </div>
 
-        <section id="add-service" class="card mb-8">
-            <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">ثبت سرویس جدید</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div>
-                    <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (میلادی):</label>
-                    <input type="date" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">تاریخ را به میلادی وارد کنید (مثال: 2023-01-15)</p>
+            <div id="add-car-form" class="hidden bg-gray-50 p-4 rounded-md mt-4">
+                <h3 class="text-lg font-bold mb-3">افزودن خودرو جدید</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label for="carMake" class="block text-sm font-medium text-gray-700 mb-1">برند:</label>
+                        <input type="text" id="carMake" placeholder="مثال: هیوندای">
+                    </div>
+                    <div>
+                        <label for="carModel" class="block text-sm font-medium text-gray-700 mb-1">مدل:</label>
+                        <input type="text" id="carModel" placeholder="مثال: ورنا">
+                    </div>
+                    <div>
+                        <label for="carYear" class="block text-sm font-medium text-gray-700 mb-1">سال تولید:</label>
+                        <input type="number" id="carYear" placeholder="مثال: 2005">
+                    </div>
+                    <div>
+                        <label for="carEngine" class="block text-sm font-medium text-gray-700 mb-1">نوع موتور:</label>
+                        <input type="text" id="carEngine" placeholder="مثال: 1.5L دستی">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="carInitialMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ فعلی:</label>
+                        <input type="number" id="carInitialMileage" placeholder="مثال: 120000">
+                    </div>
                 </div>
-                <div>
-                    <label for="serviceMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ:</label>
-                    <input type="number" id="serviceMileage" placeholder="مثال: 120000" class="focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <div>
-                    <label for="serviceType" class="block text-sm font-medium text-gray-700 mb-1">نوع سرویس:</label>
-                    <select id="serviceType" class="focus:ring-blue-500 focus:border-blue-500">
-                        <option value="Oil Change">تعویض روغن</option>
-                        <option value="Minor Service">سرویس کوچک (۵ هزار کیلومتر)</option>
-                        <option value="Major Service">سرویس بزرگ (۱۰/۲۰ هزار کیلومتر)</option>
-                        <option value="Transmission Fluid">تعویض روغن گیربکس</option>
-                        <option value="Brake Service">سرویس ترمز</option>
-                        <option value="Other">سایر</option>
-                    </select>
-                </div>
-            </div>
-            <div id="serviceTypeDescription" class="bg-blue-50 p-4 rounded-md mt-4 hidden">
-                </div>
-            <button onclick="addService()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 mt-4">ثبت سرویس</button>
-        </section>
-
-        <section id="car-status" class="card mb-8 p-6 bg-gray-50 border-l-4 border-gray-400">
-            <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">وضعیت کلی خودرو</h2>
-            <p id="carStatusText" class="text-lg font-semibold text-gray-800">وضعیت خودرو: نامشخص</p>
-            <div id="carStatus" class="mt-3 px-4 py-2 rounded-md text-center font-bold">
-                </div>
-        </section>
-
-        <section id="next-service" class="card mb-8 p-6 bg-blue-50 border-l-4 border-blue-400">
-            <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">سرویس بعدی</h2>
-            <p id="lastServiceInfo" class="text-gray-600 mb-3 text-sm">هیچ سرویسی ثبت نشده است.</p>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <p class="text-sm font-medium text-gray-700">تاریخ پیشنهادی:</p>
-                    <p id="nextServiceDate" class="text-lg font-semibold text-blue-800">---</p>
-                </div>
-                <div>
-                    <p class="text-sm font-medium text-gray-700">کیلومتراژ پیشنهادی:</p>
-                    <p id="nextServiceMileage" class="text-lg font-semibold text-blue-800">---</p>
-                </div>
+                <button onclick="addCar()" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">ثبت خودرو</button>
             </div>
         </section>
 
-        <section id="service-history" class="card mb-8">
-            <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">تاریخچه سرویس‌ها</h2>
-            <div class="overflow-x-auto">
-                <table class="min-w-full bg-white rounded-lg">
-                    <thead>
-                        <tr class="bg-gray-100 text-gray-700 text-right">
-                            <th class="py-3 px-4 font-semibold">تاریخ (شمسی)</th>
-                            <th class="py-3 px-4 font-semibold">کیلومتراژ</th>
-                            <th class="py-3 px-4 font-semibold">نوع سرویس</th>
-                            <th class="py-3 px-4 font-semibold">عملیات</th>
-                        </tr>
-                    </thead>
-                    <tbody id="serviceHistoryBody">
-                        <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی CSV</button>
-                <div class="file-input-wrapper">
-                    <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل CSV</button>
-                    <input type="file" id="csvFileInput" accept=".csv" onchange="handleFileUpload(event)">
+        <div id="service-sections" class="hidden">
+            <section id="add-service" class="card mb-8">
+                <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">ثبت سرویس جدید</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label for="serviceDate" class="block text-sm font-medium text-gray-700 mb-1">تاریخ سرویس (شمسی):</label>
+                        <input type="text" id="serviceDate" class="focus:ring-blue-500 focus:border-blue-500" placeholder="مثال: 1402/01/15">
+                        <p class="text-xs text-gray-500 mt-1">تاریخ را با کلیک روی فیلد انتخاب کنید.</p>
+                    </div>
+                    <div>
+                        <label for="serviceMileage" class="block text-sm font-medium text-gray-700 mb-1">کیلومتراژ:</label>
+                        <input type="number" id="serviceMileage" placeholder="مثال: 120000" class="focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="serviceType" class="block text-sm font-medium text-gray-700 mb-1">نوع سرویس:</label>
+                        <select id="serviceType" class="focus:ring-blue-500 focus:border-blue-500">
+                            <option value="Oil Change">تعویض روغن</option>
+                            <option value="Minor Service">سرویس کوچک (۵ هزار کیلومتر)</option>
+                            <option value="Major Service">سرویس بزرگ (۱۰/۲۰ هزار کیلومتر)</option>
+                            <option value="Transmission Fluid">تعویض روغن گیربکس</option>
+                            <option value="Brake Service">سرویس ترمز</option>
+                            <option value="Other">سایر</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
-            <p class="text-sm text-gray-600 mt-2 text-center">پس از دانلود فایل CSV (با تاریخ میلادی)، می‌توانید آن را به صورت دستی در Google Drive یا سایر برنامه‌های صفحه گسترده آپلود کنید. برای بارگذاری مجدد، فایل باید دارای تاریخ‌های میلادی باشد.</p>
-        </section>
+                <div id="serviceTypeDescription" class="bg-blue-50 p-4 rounded-md mt-4 hidden">
+                    <!-- Service type description will be loaded here -->
+                </div>
+                <button onclick="addService()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 mt-4">ثبت سرویس</button>
+            </section>
+
+            <section id="car-status" class="card mb-8 p-6 bg-gray-50 border-l-4 border-gray-400">
+                <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">وضعیت کلی خودرو</h2>
+                <p id="carStatusText" class="text-lg font-semibold text-gray-800">وضعیت خودرو: نامشخص</p>
+                <div id="carStatus" class="mt-3 px-4 py-2 rounded-md text-center font-bold">
+                    <!-- Status color and text will be updated by JS -->
+                </div>
+            </section>
+
+            <section id="next-service" class="card mb-8 p-6 bg-blue-50 border-l-4 border-blue-400">
+                <h2 class="text-xl font-bold mb-3 text-[#6E7C7C]">سرویس بعدی</h2>
+                <p id="lastServiceInfo" class="text-gray-600 mb-3 text-sm">هیچ سرویسی ثبت نشده است.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">تاریخ پیشنهادی:</p>
+                        <p id="nextServiceDate" class="text-lg font-semibold text-blue-800">---</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">کیلومتراژ پیشنهادی:</p>
+                        <p id="nextServiceMileage" class="text-lg font-semibold text-blue-800">---</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="service-history" class="card mb-8">
+                <h2 class="text-xl font-bold mb-4 text-[#6E7C7C]">تاریخچه سرویس‌ها</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white rounded-lg">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-700 text-right">
+                                <th class="py-3 px-4 font-semibold">تاریخ (شمسی)</th>
+                                <th class="py-3 px-4 font-semibold">کیلومتراژ</th>
+                                <th class="py-3 px-4 font-semibold">نوع سرویس</th>
+                                <th class="py-3 px-4 font-semibold">عملیات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="serviceHistoryBody">
+                            <!-- Service records will be loaded here by JavaScript -->
+                            <tr><td colspan="4" class="py-4 text-center text-gray-500">در حال بارگذاری سرویس‌ها...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                    <button onclick="exportServicesToCSV()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">خروجی فایل سرویس</button>
+                    <div class="file-input-wrapper">
+                        <button class="file-input-button py-2 px-4 focus:outline-none focus:ring-2 focus:ring-brown-500 focus:ring-offset-2">بارگذاری فایل سرویس</button>
+                        <input type="file" id="csvFileInput" accept=".carservice" onchange="handleFileUpload(event)">
+                    </div>
+                </div>
+                <p class="text-sm text-gray-600 mt-2 text-center">فایل خروجی با پسوند ".carservice" ذخیره می‌شود و فقط توسط این برنامه قابل بارگذاری مجدد است.</p>
+            </section>
+        </div>
 
         <footer class="text-center mt-12 pt-6 border-t border-gray-200">
             <p class="text-sm text-gray-500">طراحی و پیاده‌سازی شده برای پیگیری سرویس‌های خودروی شما.</p>
         </footer>
     </div>
 
+    <!-- Custom Confirmation Modal -->
     <div id="confirmationModal" class="modal-overlay hidden">
         <div class="modal-content">
             <h3 id="modalTitle" class="text-xl font-bold mb-4 text-gray-800"></h3>
@@ -195,402 +962,5 @@
         </div>
     </div>
 
-<script>
-    // Service descriptions for tooltip/popover
-    const serviceDetails = {
-        "Oil Change": {
-            interval: "هر ۵,۰۰۰ کیلومتر یا ۶ ماه",
-            description: "تعویض روغن موتور و فیلتر روغن. برای ورنا، استفاده از روغن موتور ۱۰W-۴۰ یا ۵W-۳۰ (بسته به آب و هوا) با استاندارد API SN یا SM توصیه می‌شود. این کار برای روان‌کاری قطعات موتور و جلوگیری از فرسایش حیاتی است."
-        },
-        "Minor Service": {
-            interval: "هر ۱۰,۰۰۰ کیلومتر یا ۱۲ ماه",
-            description: "شامل تعویض روغن و فیلتر روغن، فیلتر هوا، فیلتر کابین و بررسی کلی سیستم‌های خودرو مانند ترمز، تعلیق و مایعات. این سرویس برای حفظ عملکرد بهینه و شناسایی مشکلات اولیه ضروری است."
-        },
-        "Major Service": {
-            interval: "هر ۲۰,۰۰۰ تا ۴۰,۰۰۰ کیلومتر یا ۲۴ ماه",
-            description: "یک سرویس جامع‌تر که علاوه بر موارد سرویس کوچک، شامل تعویض مایع خنک‌کننده، بررسی و تعویض شمع‌ها (در صورت نیاز)، بررسی کامل لنت و دیسک ترمز، و بازدید دقیق تسمه‌ها و سیستم تعلیق است. برای اطمینان از سلامت بلندمدت خودرو حیاتی است."
-        },
-        "Transmission Fluid": {
-            interval: "هر ۴۰,۰۰۰ تا ۶۰,۰۰۰ کیلومتر",
-            description: "تعویض روغن گیربکس (به خصوص در مدل‌های اتوماتیک ورنا که حساسیت بیشتری دارند). استفاده از روغن با مشخصات دقیق توصیه شده توسط هیوندای برای جلوگیری از مشکلات گیربکس (مانند تقه زدن) بسیار مهم است."
-        },
-        "Brake Service": {
-            interval: "بر اساس فرسایش (معمولاً هر ۲۰,۰۰0 تا ۴۰,۰۰۰ کیلومتر)",
-            description: "بررسی و تعویض لنت‌ها و دیسک‌های ترمز. همچنین بررسی سطح و کیفیت روغن ترمز. برای ایمنی خودرو بسیار حیاتی است."
-        },
-        "Other": {
-            interval: "بر اساس نیاز",
-            description: "سایر سرویس‌ها و تعمیرات متفرقه که ممکن است بر اساس نیاز خودرو یا توصیه‌های مکانیک انجام شود."
-        }
-    };
-
-    // Custom Confirmation Modal Logic
-    const confirmationModal = document.getElementById('confirmationModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const modalMessage = document.getElementById('modalMessage');
-    const modalConfirmBtn = document.getElementById('modalConfirmBtn');
-    const modalCancelBtn = document.getElementById('modalCancelBtn');
-
-    let resolveModalPromise;
-
-    function showConfirmationModal(title, message) {
-        modalTitle.textContent = title;
-        modalMessage.textContent = message;
-        confirmationModal.classList.remove('hidden');
-
-        return new Promise((resolve) => {
-            resolveModalPromise = resolve;
-        });
-    }
-
-    modalConfirmBtn.addEventListener('click', () => {
-        confirmationModal.classList.add('hidden');
-        resolveModalPromise(true);
-    });
-
-    modalCancelBtn.addEventListener('click', () => {
-        confirmationModal.classList.add('hidden');
-        resolveModalPromise(false);
-    });
-
-    // Helper function to display status messages
-    const displayStatusMessage = (message, type = 'info') => {
-        const statusMessageElem = document.getElementById('status-message');
-        statusMessageElem.textContent = message;
-        statusMessageElem.classList.remove('hidden', 'bg-red-100', 'border-red-400', 'text-red-700', 'bg-green-100', 'border-green-400', 'text-green-700', 'bg-blue-100', 'border-blue-400', 'text-blue-700');
-        if (type === 'error') {
-            statusMessageElem.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
-        } else if (type === 'success') {
-            statusMessageElem.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
-        } else { // info
-            statusMessageElem.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
-        }
-    };
-
-    // Function to save services to localStorage
-    const saveServicesToLocalStorage = (services) => {
-        localStorage.setItem('vernaServiceHistory', JSON.stringify(services));
-    };
-
-    // Function to load services from localStorage
-    const getServicesFromLocalStorage = () => {
-        const servicesJson = localStorage.getItem('vernaServiceHistory');
-        return servicesJson ? JSON.parse(servicesJson) : [];
-    };
-
-    // Function to add a new service record
-    window.addService = async () => {
-        const serviceDateInput = document.getElementById('serviceDate');
-        const serviceMileageInput = document.getElementById('serviceMileage');
-        const serviceTypeInput = document.getElementById('serviceType');
-
-        const date = serviceDateInput.value; // This will be in YYYY-MM-DD (Gregorian)
-        const mileage = parseInt(serviceMileageInput.value);
-        const type = serviceTypeInput.value;
-
-        if (!date || isNaN(mileage) || mileage <= 0 || !type) {
-            displayStatusMessage('لطفا تمام فیلدها را به درستی پر کنید.', 'error');
-            return;
-        }
-        document.getElementById('status-message').classList.add('hidden'); // Clear previous messages
-
-        const services = getServicesFromLocalStorage();
-        services.unshift({ // Add to the beginning to keep latest on top
-            date: date,
-            mileage: mileage,
-            type: type,
-            timestamp: new Date().toISOString() // Use ISO string for consistent sorting
-        });
-        saveServicesToLocalStorage(services);
-        
-        serviceDateInput.value = '';
-        serviceMileageInput.value = '';
-        serviceTypeInput.value = 'Oil Change';
-        displayStatusMessage('سرویس با موفقیت ثبت شد!', 'success');
-        loadServices(); // Re-render and recalculate
-    };
-
-    // Function to delete a service record
-    window.deleteService = async (timestamp) => {
-        const services = getServicesFromLocalStorage();
-        const updatedServices = services.filter(service => service.timestamp !== timestamp);
-        saveServicesToLocalStorage(updatedServices);
-        displayStatusMessage('سرویس با موفقیت حذف شد!', 'success');
-        loadServices(); // Re-render and recalculate
-    };
-
-    // Load services and render them
-    const loadServices = () => {
-        const services = getServicesFromLocalStorage();
-        // Sort services by timestamp in descending order (latest first)
-        services.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        renderServices(services);
-        calculateNextService(services);
-    };
-
-    // Render services in the table
-    const renderServices = (services) => {
-        const serviceHistoryBody = document.getElementById('serviceHistoryBody');
-        serviceHistoryBody.innerHTML = '';
-        if (services.length === 0) {
-            serviceHistoryBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">هیچ سرویسی ثبت نشده است.</td></tr>`;
-            return;
-        }
-        services.forEach(service => {
-            // Convert Gregorian date string to Date object, then to Persian string
-            const persianDate = new Date(service.date).toLocaleDateString('fa-IR', { calendar: 'persian' });
-            const row = document.createElement('tr');
-            row.className = 'border-b border-gray-200 hover:bg-gray-50';
-            row.innerHTML = `
-                <td class="py-3 px-4">${persianDate}</td>
-                <td class="py-3 px-4">${service.mileage.toLocaleString()} کیلومتر</td>
-                <td class="py-3 px-4">${service.type}</td>
-                <td class="py-3 px-4">
-                    <button onclick="deleteService('${service.timestamp}')" class="bg-red-500 text-white px-3 py-1 rounded-md text-sm hover:bg-red-600 transition-colors duration-200">حذف</button>
-                </td>
-            `;
-            serviceHistoryBody.appendChild(row);
-        });
-    };
-
-    // Calculate and display next service and update car status
-    const calculateNextService = (services) => {
-        const nextServiceDateElem = document.getElementById('nextServiceDate');
-        const nextServiceMileageElem = document.getElementById('nextServiceMileage');
-        const lastServiceInfoElem = document.getElementById('lastServiceInfo');
-
-        if (services.length === 0) {
-            nextServiceDateElem.textContent = '---';
-            nextServiceMileageElem.textContent = '---';
-            lastServiceInfoElem.textContent = 'هیچ سرویسی ثبت نشده است.';
-            updateCarStatus(null); // No services, status unknown
-            return;
-        }
-
-        const latestService = services[0]; // Services are already sorted by timestamp desc
-        const lastServiceDate = new Date(latestService.date); // This is a Gregorian Date object
-        const lastServiceMileage = latestService.mileage;
-
-        // Display last service date in Persian
-        const lastServicePersianDate = lastServiceDate.toLocaleDateString('fa-IR', { calendar: 'persian' });
-        lastServiceInfoElem.textContent = `آخرین سرویس: ${lastServicePersianDate} در ${latestService.mileage.toLocaleString()} کیلومتر (${latestService.type})`;
-
-        // Assuming common service intervals for Verna:
-        // Minor service: Every 6 months OR 10,000 km (whichever comes first)
-        const nextDateByTime = new Date(lastServiceDate);
-        nextDateByTime.setMonth(nextDateByTime.getMonth() + 6); // Add 6 months to Gregorian date
-
-        const nextMileageByKm = lastServiceMileage + 10000; // 10,000 km for next minor check
-
-        // Display the calculated next service date in Persian
-        nextServiceDateElem.textContent = nextDateByTime.toLocaleDateString('fa-IR', { calendar: 'persian' });
-        nextServiceMileageElem.textContent = `${nextMileageByKm.toLocaleString()} کیلومتر`;
-
-        updateCarStatus(latestService); // Update status based on latest service
-    };
-
-    // Function to update car status based on last service
-    const updateCarStatus = (latestService) => {
-        const carStatusElem = document.getElementById('carStatus');
-        const carStatusTextElem = document.getElementById('carStatusText');
-
-        carStatusElem.classList.remove('bg-green-100', 'border-green-400', 'text-green-700',
-                                'bg-yellow-100', 'border-yellow-400', 'text-yellow-700',
-                                'bg-red-100', 'border-red-400', 'text-red-700',
-                                'bg-gray-100', 'border-gray-400', 'text-gray-700'); // Remove all before adding
-
-        if (!latestService) {
-            carStatusTextElem.textContent = 'وضعیت خودرو: نامشخص';
-            carStatusElem.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-700');
-            return;
-        }
-
-        const today = new Date();
-        const lastServiceDate = new Date(latestService.date);
-        
-        // Calculate next service date based on 6-month interval from last service
-        const nextServiceDueDateByTime = new Date(lastServiceDate);
-        nextServiceDueDateByTime.setMonth(nextServiceDueDateByTime.getMonth() + 6);
-
-        let status = 'عالی'; // Default to green
-        let statusClass = 'bg-green-100 border-green-400 text-green-700';
-
-        // Check if service is overdue by time (more than 30 days past due date)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-
-        if (nextServiceDueDateByTime < thirtyDaysAgo) {
-            status = 'نیاز به توجه'; // Red: More than 30 days overdue
-            statusClass = 'bg-red-100 border-red-400 text-red-700';
-        } else if (nextServiceDueDateByTime < today) {
-            status = 'متوسط'; // Yellow: Overdue but less than 30 days
-            statusClass = 'bg-yellow-100 border-yellow-400 text-yellow-700';
-        } else {
-            // Check if service is approaching (within 30 days from now)
-            const thirtyDaysFromNow = new Date();
-            thirtyDaysFromNow.setDate(today.getDate() + 30);
-            if (nextServiceDueDateByTime < thirtyDaysFromNow) {
-                status = 'متوسط'; // Yellow: Approaching due date
-                statusClass = 'bg-yellow-100 border-yellow-400 text-yellow-700';
-            }
-        }
-        
-        carStatusTextElem.textContent = `وضعیت خودرو: ${status}`;
-        carStatusElem.classList.add(...statusClass.split(' '));
-    };
-
-    // Function to export services to CSV
-    window.exportServicesToCSV = async () => {
-        displayStatusMessage('در حال آماده‌سازی فایل CSV...', 'info');
-
-        const services = getServicesFromLocalStorage();
-
-        if (services.length === 0) {
-            displayStatusMessage('هیچ سرویسی برای خروجی گرفتن وجود ندارد.', 'info');
-            return;
-        }
-
-        // Define CSV headers
-        const headers = ['تاریخ سرویس (میلادی)', 'کیلومتراژ', 'نوع سرویس']; // Clarify date format in header
-        
-        // Map service data to CSV rows
-        const csvRows = services.map(service => {
-            return [
-                `"${service.date}"`, // Store as Gregorian YYYY-MM-DD string
-                service.mileage,
-                `"${service.type}"`
-            ].join(',');
-        });
-
-        // Combine headers and rows
-        const csvContent = headers.join(',') + '\n' + csvRows.join('\n');
-
-        // Create a Blob and download it
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        if (link.download !== undefined) { // Feature detection for download attribute
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', 'verna_service_history.csv');
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            displayStatusMessage('فایل CSV با موفقیت دانلود شد.', 'success');
-        } else {
-            displayStatusMessage('مرورگر شما از قابلیت دانلود مستقیم پشتیبانی نمی‌کند. لطفا محتوا را کپی کنید.', 'error');
-        }
-    };
-
-    // Function to handle CSV file upload
-    window.handleFileUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file) {
-            return;
-        }
-
-        if (file.type !== 'text/csv') {
-            displayStatusMessage('لطفا یک فایل CSV معتبر انتخاب کنید.', 'error');
-            return;
-        }
-
-        const confirmed = await showConfirmationModal(
-            'تأیید بارگذاری فایل',
-            'با بارگذاری این فایل، تمامی اطلاعات سرویس‌های فعلی شما حذف و با اطلاعات فایل جایگزین خواهد شد. آیا مطمئن هستید؟'
-        );
-
-        if (!confirmed) {
-            displayStatusMessage('بارگذاری فایل لغو شد.', 'info');
-            document.getElementById('csvFileInput').value = ''; // Clear file input
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const csvContent = e.target.result;
-            await importServicesFromCSV(csvContent);
-        };
-        reader.readAsText(file);
-    };
-
-    // Function to import services from CSV content
-    const importServicesFromCSV = async (csvContent) => {
-        displayStatusMessage('در حال بارگذاری و جایگزینی اطلاعات...', 'info');
-        
-        try {
-            // Parse CSV
-            const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-            if (lines.length <= 1) { // Only header or empty file
-                displayStatusMessage('فایل CSV خالی یا نامعتبر است.', 'error');
-                return;
-            }
-
-            const newServices = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Split by comma, but not inside quotes
-                if (values.length < 3) { // Ensure at least 3 columns
-                    console.warn(`Skipping malformed row (not enough columns): ${lines[i]}`);
-                    continue;
-                }
-                const service = {};
-                service.date = values[0].trim().replace(/"/g, ''); // Expected Gregorian YYYY-MM-DD
-                service.mileage = parseInt(values[1].trim());
-                service.type = values[2].trim().replace(/"/g, '');
-
-                // Basic validation for parsed data
-                if (!service.date || isNaN(service.mileage) || service.mileage <= 0 || !service.type || !new Date(service.date).getTime()) {
-                    console.warn(`Skipping row with invalid data: ${lines[i]}`);
-                    continue;
-                }
-                service.timestamp = new Date(service.date).toISOString(); // Use ISO string for timestamp
-                newServices.push(service);
-            }
-
-            if (newServices.length === 0) {
-                displayStatusMessage('هیچ داده معتبری در فایل CSV یافت نشد.', 'error');
-                return;
-            }
-
-            saveServicesToLocalStorage(newServices); // Replace all existing data
-            displayStatusMessage('اطلاعات سرویس با موفقیت از فایل CSV بارگذاری شد.', 'success');
-            loadServices(); // Re-render and recalculate
-        } catch (e) {
-            console.error("Error importing services from CSV: ", e);
-            displayStatusMessage('خطا در بارگذاری فایل CSV. لطفا از فرمت صحیح فایل (میلادی YYYY-MM-DD) اطمینان حاصل کنید.', 'error');
-        } finally {
-            document.getElementById('csvFileInput').value = ''; // Clear file input
-        }
-    };
-
-    // Function to update the service description display based on selected type
-    window.updateServiceDescriptionDisplay = async () => {
-        const serviceTypeSelect = document.getElementById('serviceType');
-        const selectedType = serviceTypeSelect.value;
-        const descriptionDiv = document.getElementById('serviceTypeDescription');
-        
-        if (serviceDetails[selectedType]) {
-            const details = serviceDetails[selectedType];
-            // Display description directly from serviceDetails object
-            descriptionDiv.innerHTML = `
-                <p class="font-semibold text-gray-800 mb-1">${selectedType}:</p>
-                <p class="text-sm text-gray-700">**دوره سرویس:** ${details.interval}</p>
-                <p class="text-sm text-gray-700">${details.description}</p>
-            `;
-            descriptionDiv.classList.remove('hidden');
-        } else {
-            descriptionDiv.classList.add('hidden');
-            descriptionDiv.innerHTML = '';
-        }
-    };
-
-
-    // Initialize app when the window loads
-    window.addEventListener('load', () => {
-        loadServices(); // Load initial services from localStorage
-        window.updateServiceDescriptionDisplay(); // Set initial description
-        document.getElementById('serviceType').addEventListener('change', window.updateServiceDescriptionDisplay);
-    });
-</script>
 </body>
 </html>
